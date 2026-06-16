@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# SQLite data
+backend/data/*.db
+
+# Ingested paper artifacts (downloaded by ferret ingest)
+backend/data/*.pdf
+backend/data/*.html
+backend/data/*.xml
+
+# Qdrant local (if ever used)
+qdrant_storage/
+
+# Eval reports (generated, not committed)
+evals/reports/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+logs/
+
+# Claude Code local settings (may contain session tokens or hook secrets)
+.claude/settings.local.json
+.claude/worktrees/*/settings.local.json
+
+# Mypy / type checkers
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Build artifacts
+*.pyc
+*.pyo

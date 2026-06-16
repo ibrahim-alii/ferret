@@ -1,0 +1,12 @@
+{
+  "name": "ferret-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "dotenv": "^16.4.0"
+  }
+}
