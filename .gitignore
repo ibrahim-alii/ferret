@@ -55,12 +55,8 @@ coverage.xml
 *.log
 logs/
 
-# Claude Code local settings (may contain session tokens or hook secrets)
-.claude/settings.local.json
-.claude/worktrees/*/settings.local.json
-
-# Git worktrees — checked-out working trees, not source files
-.claude/worktrees/
+# Claude Code 
+.claude/
 
 # Mypy / type checkers
 .mypy_cache/
