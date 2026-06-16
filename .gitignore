@@ -59,6 +59,9 @@ logs/
 .claude/settings.local.json
 .claude/worktrees/*/settings.local.json
 
+# Git worktrees — checked-out working trees, not source files
+.claude/worktrees/
+
 # Mypy / type checkers
 .mypy_cache/
 .dmypy.json
