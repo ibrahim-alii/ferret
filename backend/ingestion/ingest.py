@@ -1,18 +1,18 @@
 """Module 1 stub — paper ingestion."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.db.models import Paper
+from backend.db.session import session_context
 
 
-async def ingest_paper(arxiv_id: str, db: AsyncSession) -> None:
+async def ingest_paper(arxiv_id: str) -> None:
     """Download, chunk, embed, and upsert a paper into Qdrant.
 
-    Updates the paper row's ingestion_status to 'full', 'abstract_only',
-    or 'failed' when done.  This stub only sets status to 'full'.
+    Owns its own DB session so it can safely run as a FastAPI BackgroundTask
+    after the request session has been closed.
     """
-    paper = await db.get(Paper, arxiv_id)
-    if paper is None:
-        return
-    paper.ingestion_status = "full"
-    await db.commit()
+    async with session_context() as db:
+        paper = await db.get(Paper, arxiv_id)
+        if paper is None:
+            return
+        paper.ingestion_status = "full"
+        await db.commit()

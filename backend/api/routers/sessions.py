@@ -1,6 +1,16 @@
-"""Session and message endpoints with SSE streaming."""
+"""Session and message endpoints with SSE streaming.
+
+SSE over POST: clients consume the stream via fetch() + ReadableStream,
+not native EventSource (which is GET-only and cannot send a body).
+
+Session lifecycle note: FastAPI keeps generator-dependency sessions alive until
+the StreamingResponse body iterator is exhausted (cleanup `finally` fires after
+the last chunk, not when the route handler returns). Passing `db` into `_stream`
+is therefore safe.
+"""
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +29,7 @@ from backend.db.session import get_session
 from backend.graph.entrypoint import astream_chat
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", status_code=201, response_model=PostSessionResponse)
@@ -33,7 +44,11 @@ async def post_session(
     return PostSessionResponse(session_id=session.session_id)
 
 
-@router.post("/{session_id}/messages")
+@router.post(
+    "/{session_id}/messages",
+    responses={404: {"description": "Session not found"}},
+    response_class=StreamingResponse,
+)
 async def post_message(
     session_id: str,
     body: PostMessageRequest,
@@ -43,7 +58,7 @@ async def post_message(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Persist user message before starting the stream
+    # Persist user message before streaming begins.
     user_msg = Message(
         session_id=session_id,
         role="user",
@@ -53,23 +68,23 @@ async def post_message(
     await db.commit()
     await db.refresh(user_msg)
 
-    # Build chat history from prior messages (excludes the current user turn)
+    # Chat history = all committed messages except the current user turn.
     result = await db.execute(
         select(Message)
-        .where(Message.session_id == session_id)
+        .where(
+            Message.session_id == session_id,
+            Message.message_id != user_msg.message_id,
+        )
         .order_by(Message.created_at)
     )
-    prior_messages = result.scalars().all()
     chat_history = [
         {"role": m.role, "content": m.content}
-        for m in prior_messages
-        if m.message_id != user_msg.message_id
+        for m in result.scalars().all()
     ]
 
     return StreamingResponse(
         _stream(
             session=session,
-            user_msg=user_msg,
             user_content=body.content,
             chat_history=chat_history,
             db=db,
@@ -81,14 +96,17 @@ async def post_message(
 
 async def _stream(
     session: Session,
-    user_msg: Message,
     user_content: str,
     chat_history: list[dict],
     db: AsyncSession,
 ) -> AsyncIterator[str]:
-    assistant_content_parts: list[str] = []
-    assistant_msg_id: str | None = None
-    cited_arxiv_ids: list[str] = []
+    """Yield SSE frames, persisting the assistant message and citations on done.
+
+    Citations are buffered in memory and bulk-inserted after the assistant
+    Message row is committed so message_id is never NULL on CitedPaper rows.
+    """
+    token_parts: list[str] = []
+    buffered_citations: list[dict] = []  # [{arxiv_id, title}, ...]
 
     try:
         async for event in astream_chat(
@@ -100,27 +118,23 @@ async def _stream(
             event_type = event.get("type", "token")
 
             if event_type == "token":
-                assistant_content_parts.append(event.get("content", ""))
+                token_parts.append(event.get("content", ""))
                 yield _sse("token", {"content": event.get("content", "")})
 
             elif event_type == "interim_message":
                 yield _sse("interim_message", {"content": event.get("content", "")})
 
             elif event_type == "citation":
-                arxiv_id = event.get("arxiv_id", "")
-                cited_arxiv_ids.append(arxiv_id)
-                cited = CitedPaper(
-                    session_id=session.session_id,
-                    message_id=assistant_msg_id,
-                    arxiv_id=arxiv_id,
-                    title=event.get("title"),
+                buffered_citations.append(
+                    {"arxiv_id": event.get("arxiv_id", ""), "title": event.get("title")}
                 )
-                db.add(cited)
-                await db.commit()
-                yield _sse("citation", {"arxiv_id": arxiv_id, "title": event.get("title")})
+                yield _sse(
+                    "citation",
+                    {"arxiv_id": event.get("arxiv_id", ""), "title": event.get("title")},
+                )
 
             elif event_type == "done":
-                final_content = event.get("content", "".join(assistant_content_parts))
+                final_content = event.get("content", "".join(token_parts))
 
                 assistant_msg = Message(
                     session_id=session.session_id,
@@ -128,29 +142,31 @@ async def _stream(
                     content=final_content,
                 )
                 db.add(assistant_msg)
-                await db.commit()
-                await db.refresh(assistant_msg)
-                assistant_msg_id = assistant_msg.message_id
+                await db.flush()  # populate message_id before inserting citations
 
-                # Back-fill message_id on cited_papers written before assistant msg existed
-                if cited_arxiv_ids:
-                    from sqlalchemy import update as sa_update
-                    await db.execute(
-                        sa_update(CitedPaper)
-                        .where(
-                            CitedPaper.session_id == session.session_id,
-                            CitedPaper.message_id.is_(None),
+                for citation in buffered_citations:
+                    db.add(
+                        CitedPaper(
+                            session_id=session.session_id,
+                            message_id=assistant_msg.message_id,
+                            arxiv_id=citation["arxiv_id"],
+                            title=citation["title"],
                         )
-                        .values(message_id=assistant_msg_id)
                     )
-                    await db.commit()
+
+                await db.commit()
 
                 yield _sse(
                     "done",
-                    {"content": final_content, "cited_papers": cited_arxiv_ids},
+                    {
+                        "content": final_content,
+                        "cited_papers": [c["arxiv_id"] for c in buffered_citations],
+                    },
                 )
+
     except GeneratorExit:
-        pass  # client disconnected; no server error
+        logger.info("SSE client disconnected for session %s", session.session_id)
+        await db.rollback()
 
 
 def _sse(event: str, data: dict) -> str:
@@ -171,5 +187,4 @@ async def get_messages(
         .where(Message.session_id == session_id)
         .order_by(Message.created_at)
     )
-    messages = result.scalars().all()
-    return [MessageResponse.model_validate(m) for m in messages]
+    return [MessageResponse.model_validate(m) for m in result.scalars().all()]

@@ -24,8 +24,9 @@ async def post_paper(
         await db.commit()
         await db.refresh(paper)
 
-    # Queue ingestion regardless — ingest_paper is idempotent
-    background_tasks.add_task(ingest_paper, body.arxiv_id, db)
+    # Queue ingestion — ingest_paper owns its own session to avoid using the
+    # request-scoped session after it is closed.
+    background_tasks.add_task(ingest_paper, body.arxiv_id)
 
     return PaperStatusResponse(
         arxiv_id=paper.arxiv_id,

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, field_validator, model_validator
+
+_ARXIV_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 
 
 # ---------------------------------------------------------------------------
@@ -18,10 +21,11 @@ class PostPaperRequest(BaseModel):
 
     @field_validator("arxiv_id")
     @classmethod
-    def arxiv_id_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("arxiv_id must not be empty")
-        return v.strip()
+    def arxiv_id_valid(cls, v: str) -> str:
+        v = v.strip()
+        if not _ARXIV_RE.match(v):
+            raise ValueError("Invalid arXiv ID format, expected e.g. 2301.00001")
+        return v
 
 
 class PaperStatusResponse(BaseModel):
@@ -41,7 +45,7 @@ class PostSessionRequest(BaseModel):
     paper_id: str | None = None
 
     @model_validator(mode="after")
-    def deep_dive_requires_paper_id(self) -> "PostSessionRequest":
+    def deep_dive_requires_paper_id(self) -> PostSessionRequest:
         if self.mode == "deep_dive" and not self.paper_id:
             raise ValueError("paper_id is required for deep_dive mode")
         return self
