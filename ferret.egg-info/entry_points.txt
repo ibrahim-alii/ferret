@@ -1,0 +1,2 @@
+[console_scripts]
+ferret = backend.cli.main:app
