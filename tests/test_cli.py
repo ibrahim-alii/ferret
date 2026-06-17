@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from backend.cli.main import app
@@ -103,6 +102,7 @@ class TestFerretWeb:
 
         result = runner.invoke(app, ["web", "--port", "4000"])
         assert result.exit_code == 0
+        mock_subprocess.Popen.assert_called_once()
         env_passed = mock_subprocess.Popen.call_args.kwargs.get("env", {})
         assert env_passed.get("PORT") == "4000"
 
@@ -126,7 +126,7 @@ class TestFerretDev:
     def test_dev_shuts_down_both_on_interrupt(self, mock_subprocess):
         mock_backend = MagicMock()
         mock_frontend = MagicMock()
-        mock_backend.wait.side_effect = KeyboardInterrupt
+        mock_backend.wait.side_effect = [KeyboardInterrupt, None]
         mock_subprocess.Popen.side_effect = [mock_backend, mock_frontend]
 
         runner.invoke(app, ["dev"])

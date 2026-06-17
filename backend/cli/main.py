@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import enum
 import os
 import subprocess
 import sys
@@ -17,6 +18,11 @@ from backend.graph.chain import astream_chat
 from evals.run_all import run_all
 
 app = typer.Typer(help="Ferret — research paper chat assistant.")
+
+
+class ChatMode(str, enum.Enum):
+    deep_dive = "deep_dive"
+    ask = "ask"
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +69,7 @@ def web(
         returncode = proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
+        proc.wait()
         returncode = 130
     raise typer.Exit(returncode)
 
@@ -89,12 +96,15 @@ def dev() -> None:
         env={**os.environ, "PORT": frontend_port},
     )
     try:
-        backend_proc.wait()
+        returncode = backend_proc.wait()
     except KeyboardInterrupt:
-        pass
+        returncode = 130
     finally:
         backend_proc.terminate()
         frontend_proc.terminate()
+        backend_proc.wait()
+        frontend_proc.wait()
+    raise typer.Exit(returncode)
 
 
 # ---------------------------------------------------------------------------
@@ -105,24 +115,46 @@ def dev() -> None:
 def ingest(arxiv_id: str = typer.Argument(..., help="arXiv paper ID")) -> None:
     """Ingest a paper from arXiv into the knowledge base."""
     result = asyncio.run(ingest_paper(arxiv_id))
-    typer.echo(f"Status: {result['status']}")
-    typer.echo(f"Title:  {result['title']}")
+    typer.echo(f"Status: {result.get('status', 'unknown')}")
+    typer.echo(f"Title:  {result.get('title', '')}")
 
 
 # ---------------------------------------------------------------------------
 # ferret chat
 # ---------------------------------------------------------------------------
 
+async def _run_chat_turn(
+    mode: str,
+    paper_id: Optional[str],
+    user_message: str,
+    chat_history: list,
+) -> str:
+    """Stream one chat turn; return the full assistant response."""
+    full_response = ""
+    async for event in astream_chat(mode, paper_id, user_message, chat_history):
+        etype = event.get("type")
+        content = event.get("content", "")
+        if etype == "token":
+            typer.echo(content, nl=False)
+            full_response += content
+        elif etype == "citation":
+            typer.echo(f"\n[citation] {content}")
+        elif etype == "interim_message":
+            typer.echo(f"\n[…] {content}")
+    typer.echo("")
+    return full_response
+
+
 @app.command()
 def chat(
-    mode: str = typer.Option(..., help="Chat mode: deep_dive or ask"),
+    mode: ChatMode = typer.Option(..., help="Chat mode"),
     paper_id: Optional[str] = typer.Option(None, help="Paper ID (required for deep_dive)"),
 ) -> None:
     """Terminal chat against the graph. History is held in memory only."""
-    if mode == "deep_dive" and paper_id is None:
+    if mode == ChatMode.deep_dive and paper_id is None:
         typer.echo("Error: --paper-id is required for deep_dive mode.", err=True)
         raise typer.Exit(1)
-    if mode == "ask" and paper_id is not None:
+    if mode == ChatMode.ask and paper_id is not None:
         typer.echo("Error: --paper-id must not be set for ask mode.", err=True)
         raise typer.Exit(1)
 
@@ -136,22 +168,9 @@ def chat(
         if not user_message:
             continue
 
-        async def _stream(msg: str, history: list) -> str:
-            full_response = ""
-            async for event in astream_chat(mode, paper_id, msg, history):
-                etype = event.get("type")
-                content = event.get("content", "")
-                if etype == "token":
-                    typer.echo(content, nl=False)
-                    full_response += content
-                elif etype == "citation":
-                    typer.echo(f"\n[citation] {content}")
-                elif etype == "interim_message":
-                    typer.echo(f"\n[…] {content}")
-            typer.echo("")
-            return full_response
-
-        response = asyncio.run(_stream(user_message, chat_history))
+        response = asyncio.run(
+            _run_chat_turn(mode.value, paper_id, user_message, chat_history)
+        )
         chat_history.append({"role": "user", "content": user_message})
         chat_history.append({"role": "assistant", "content": response})
 
@@ -160,8 +179,8 @@ def chat(
 # ferret eval
 # ---------------------------------------------------------------------------
 
-@app.command()
-def eval(
+@app.command(name="eval")
+def run_eval(
     paper_id: str = typer.Option(..., help="Paper ID to evaluate against"),
     mode: Optional[str] = typer.Option(None, help="Restrict to a single mode"),
 ) -> None:
