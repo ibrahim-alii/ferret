@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ferret — Research Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-mark">⬡</span>
+        <span class="logo-text">Ferret</span>
+      </div>
+      <p class="logo-sub">Research Intelligence</p>
+    </header>
+
+    <nav class="mode-tabs" role="tablist" aria-label="Research mode">
+      <button id="tab-ask" role="tab" aria-selected="true" class="tab active">
+        <span class="tab-icon">◎</span> Ask
+      </button>
+      <button id="tab-deep" role="tab" aria-selected="false" class="tab">
+        <span class="tab-icon">◈</span> Deep Dive
+      </button>
+    </nav>
+
+    <section id="arxiv-section" class="arxiv-section" hidden aria-label="Paper ingestion">
+      <div class="arxiv-row">
+        <label for="arxiv-input" class="sr-only">arXiv ID</label>
+        <input
+          id="arxiv-input"
+          type="text"
+          placeholder="arXiv ID — e.g. 2301.00001"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="arXiv paper ID"
+        />
+        <button id="arxiv-btn" aria-label="Ingest paper">Ingest</button>
+      </div>
+      <p id="ingestion-status" class="status-line" aria-live="polite"></p>
+    </section>
+
+    <main class="chat-area" aria-label="Conversation">
+      <div
+        id="chat-list"
+        class="chat-list"
+        role="log"
+        aria-label="Messages"
+        aria-live="polite"
+      ></div>
+
+      <div class="input-row">
+        <label for="chat-input" class="sr-only">Message</label>
+        <textarea
+          id="chat-input"
+          rows="1"
+          placeholder="Ask a question…"
+          disabled
+          aria-label="Chat message"
+        ></textarea>
+        <button id="chat-btn" disabled aria-label="Send message">
+          <span aria-hidden="true">↑</span>
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
