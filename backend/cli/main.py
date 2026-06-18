@@ -6,6 +6,7 @@ import enum
 import os
 import subprocess
 import sys
+import threading
 from typing import Optional
 
 import typer
@@ -78,9 +79,18 @@ def web(
 # ferret dev
 # ---------------------------------------------------------------------------
 
+def _pipe_output(proc: subprocess.Popen, prefix: str) -> None:
+    """Forward lines from a subprocess stdout to our stdout with a prefix."""
+    if proc.stdout is None:
+        return
+    for line in proc.stdout:
+        sys.stdout.write(f"[{prefix}] {line}")
+        sys.stdout.flush()
+
+
 @app.command()
 def dev() -> None:
-    """Run backend and frontend together; Ctrl-C shuts both down cleanly."""
+    """Run backend and frontend together, streaming both logs; Ctrl-C shuts both down."""
     backend_host = os.environ.get("BACKEND_HOST", "127.0.0.1")
     backend_port = os.environ.get("BACKEND_PORT", "8000")
     frontend_port = os.environ.get("FRONTEND_PORT", "3000")
@@ -90,11 +100,21 @@ def dev() -> None:
             sys.executable, "-m", "uvicorn", "backend.api.app:app",
             "--host", backend_host, "--port", backend_port,
         ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
     frontend_proc = subprocess.Popen(
         ["npm", "start"],
         env={**os.environ, "PORT": frontend_port},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
+
+    threading.Thread(target=_pipe_output, args=(backend_proc, "backend"), daemon=True).start()
+    threading.Thread(target=_pipe_output, args=(frontend_proc, "frontend"), daemon=True).start()
+
     try:
         returncode = backend_proc.wait()
     except KeyboardInterrupt:
