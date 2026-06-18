@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ranx import Qrels, Run, evaluate, compare
+from ranx import Qrels, Run, evaluate
 
 
 def build_run(results: dict[str, list[dict]], run_name: str = "run") -> Run:

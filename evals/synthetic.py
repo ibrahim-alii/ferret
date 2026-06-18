@@ -28,7 +28,10 @@ def _call_llm(prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
         max_tokens=2048,
     )
-    return completion.choices[0].message.content.strip()
+    content = completion.choices[0].message.content if completion.choices else None
+    if not content:
+        raise ValueError("LLM returned empty content")
+    return content.strip()
 
 
 def _qrels_cache_path(paper_id: str) -> Path:
@@ -60,10 +63,11 @@ def generate_qrels(paper_id: str) -> dict[str, dict[str, int]]:
 
     try:
         entries = json.loads(raw)
-    except json.JSONDecodeError:
-        # Try to extract JSON from the response
+    except json.JSONDecodeError as exc:
         start = raw.find("[")
         end = raw.rfind("]") + 1
+        if start == -1 or end == 0:
+            raise ValueError(f"LLM returned non-JSON response: {raw!r}") from exc
         entries = json.loads(raw[start:end])
 
     qrels: dict[str, dict[str, int]] = {}
@@ -100,9 +104,11 @@ def generate_eval_dataset(paper_id: str, mode: str) -> list[dict[str, Any]]:
 
     try:
         dataset = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         start = raw.find("[")
         end = raw.rfind("]") + 1
+        if start == -1 or end == 0:
+            raise ValueError(f"LLM returned non-JSON response: {raw!r}") from exc
         dataset = json.loads(raw[start:end])
 
     with open(cache_path, "w") as f:

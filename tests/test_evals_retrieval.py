@@ -71,4 +71,5 @@ class TestRetrievalEval:
 
         serialized = json.dumps(report)
         loaded = json.loads(serialized)
-        assert "dense" in loaded or "runs" in loaded or isinstance(loaded, dict)
+        assert "runs" in loaded
+        assert set(loaded["runs"].keys()) == {"dense", "hybrid", "hybrid_rerank"}

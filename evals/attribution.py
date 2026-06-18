@@ -8,13 +8,23 @@ from typing import Any
 import numpy as np
 import voyageai
 
-
 _SIMILARITY_THRESHOLD = 0.75
+
+_voyage_client: voyageai.Client | None = None
+
+
+def _get_voyage_client() -> voyageai.Client:
+    global _voyage_client
+    if _voyage_client is None:
+        api_key = os.environ.get("VOYAGE_API_KEY")
+        if not api_key:
+            raise EnvironmentError("VOYAGE_API_KEY is not set")
+        _voyage_client = voyageai.Client(api_key=api_key)
+    return _voyage_client
 
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
-    client = voyageai.Client(api_key=os.environ.get("VOYAGE_API_KEY", ""))
-    result = client.embed(texts, model="voyage-3", input_type="document")
+    result = _get_voyage_client().embed(texts, model="voyage-3", input_type="document")
     return result.embeddings
 
 
@@ -41,12 +51,17 @@ def attribute_answer(
 
     Returns: {attribution_rate, unattributed_sentences, chunk_utilization_rate}
     """
+    if not answer or not answer.strip():
+        raise ValueError("answer must be a non-empty string")
+
     sentences = _split_sentences(answer)
     chunk_texts = [c["text"] for c in retrieved_chunks]
     chunk_ids = [c["chunk_id"] for c in retrieved_chunks]
 
-    sentence_embeddings = _embed_texts(sentences)
-    chunk_embeddings = _embed_texts(chunk_texts)
+    # Single batched embed call to halve API round-trips
+    all_embeddings = _embed_texts(sentences + chunk_texts)
+    sentence_embeddings = all_embeddings[: len(sentences)]
+    chunk_embeddings = all_embeddings[len(sentences) :]
 
     unattributed: list[str] = []
     used_chunk_ids: set[str] = set()

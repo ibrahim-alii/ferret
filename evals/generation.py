@@ -31,8 +31,11 @@ def _run_ragas(dataset: list[dict[str, Any]]) -> dict[str, float]:
     llm = ChatGroq(
         model=os.environ.get("GENERATION_MODEL", "llama-3.1-8b-instant"),
     )
+    voyage_key = os.environ.get("VOYAGE_API_KEY")
+    if not voyage_key:
+        raise EnvironmentError("VOYAGE_API_KEY is not set")
     embeddings = VoyageAIEmbeddings(
-        voyage_api_key=os.environ.get("VOYAGE_API_KEY", ""),
+        voyage_api_key=voyage_key,
         model="voyage-3",
     )
 

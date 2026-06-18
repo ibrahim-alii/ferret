@@ -20,6 +20,8 @@ def save_baseline(scores: dict[str, float], paper_id: str) -> None:
 
 def load_baseline(paper_id: str) -> dict[str, float]:
     path = _baseline_path(paper_id)
+    if not path.exists():
+        raise FileNotFoundError(f"No baseline found for paper '{paper_id}' at {path}")
     with open(path) as f:
         return json.load(f)
 

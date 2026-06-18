@@ -28,9 +28,10 @@ class TestAttribution:
         answer = "Completely unrelated statement. Another unrelated sentence."
         chunks = [{"chunk_id": "c1", "text": "Something totally different."}]
 
-        # Low similarity embeddings — sentences should be unattributed
+        # Single batched call: [sent0, sent1, c1]
+        # Sentences are orthogonal to the chunk => similarity = 0 => unattributed
         def mock_embed(texts: list[str]) -> list[list[float]]:
-            return [[1.0, 0.0]] * len(texts[:1]) + [[0.0, 1.0]] * len(texts[1:])
+            return [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
 
         with patch("evals.attribution._embed_texts", side_effect=mock_embed):
             result = attribute_answer(answer, chunks)
@@ -45,8 +46,8 @@ class TestAttribution:
         answer = chunk_text  # Identical => should be attributed
         chunks = [{"chunk_id": "c1", "text": chunk_text}]
 
-        # Same embedding => cosine similarity = 1.0
-        with patch("evals.attribution._embed_texts", return_value=[[0.5, 0.5]]):
+        # Batched call: [sentence, chunk] — same embedding => cosine similarity = 1.0
+        with patch("evals.attribution._embed_texts", return_value=[[0.5, 0.5], [0.5, 0.5]]):
             result = attribute_answer(answer, chunks)
 
         assert result["attribution_rate"] >= 0.5
@@ -80,16 +81,16 @@ class TestAttribution:
             {"chunk_id": "c3", "text": "Sentence C."},
         ]
 
-        # c1 matches sentence 0, c2 matches sentence 1, c3 unused
-        call_count = {"n": 0}
-
+        # Single batched call: [sent0, sent1, c1, c2, c3] -> 5 embeddings
+        # sent0 matches c1 (both [1,0,0]), sent1 matches c2 (both [0,1,0]), c3 unused [0,0,1]
         def mock_embed(texts: list[str]) -> list[list[float]]:
-            n = len(texts)
-            # For 2 sentences: [[1,0,0], [0,1,0]]
-            # For 3 chunks: [[1,0,0], [0,1,0], [0,0,1]]
-            if n == 2:
-                return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-            return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            return [
+                [1.0, 0.0, 0.0],  # sentence 0
+                [0.0, 1.0, 0.0],  # sentence 1
+                [1.0, 0.0, 0.0],  # chunk c1
+                [0.0, 1.0, 0.0],  # chunk c2
+                [0.0, 0.0, 1.0],  # chunk c3
+            ]
 
         with patch("evals.attribution._embed_texts", side_effect=mock_embed):
             result = attribute_answer(answer, chunks)

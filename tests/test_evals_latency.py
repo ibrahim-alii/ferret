@@ -21,8 +21,7 @@ class TestLatencyTracker:
         assert "retrieval" in report["stages"]
         assert report["stages"]["retrieval"] >= 0.0
 
-    @pytest.mark.asyncio
-    async def test_api_call_counter_increments_on_groq_call(self):
+    def test_api_call_counter_increments_on_groq_call(self):
         from evals.latency import LatencyTracker
 
         tracker = LatencyTracker()
@@ -32,8 +31,7 @@ class TestLatencyTracker:
         report = tracker.report()
         assert report["calls"]["groq"] == 2
 
-    @pytest.mark.asyncio
-    async def test_api_call_counter_increments_on_voyage_embed_call(self):
+    def test_api_call_counter_increments_on_voyage_embed_call(self):
         from evals.latency import LatencyTracker
 
         tracker = LatencyTracker()
@@ -42,8 +40,7 @@ class TestLatencyTracker:
         report = tracker.report()
         assert report["calls"]["voyage"] == 1
 
-    @pytest.mark.asyncio
-    async def test_api_call_counter_increments_on_qdrant_query(self):
+    def test_api_call_counter_increments_on_qdrant_query(self):
         from evals.latency import LatencyTracker
 
         tracker = LatencyTracker()
@@ -54,21 +51,18 @@ class TestLatencyTracker:
         report = tracker.report()
         assert report["calls"]["qdrant"] == 3
 
-    @pytest.mark.asyncio
-    async def test_sufficient_branch_groq_calls_within_budget(self):
+    def test_sufficient_branch_groq_calls_within_budget(self):
         """Sufficient branch should use <= 2 Groq calls (grade + generate)."""
         from evals.latency import LatencyTracker
 
         tracker = LatencyTracker()
-        # Simulate sufficient branch: 1 grade call + 1 generate call
         tracker.count_call("groq")
         tracker.count_call("groq")
 
         report = tracker.report()
         assert report["calls"].get("groq", 0) <= 2
 
-    @pytest.mark.asyncio
-    async def test_corrective_branch_groq_calls_within_budget(self):
+    def test_corrective_branch_groq_calls_within_budget(self):
         """Corrective branch should use <= 5 Groq calls."""
         from evals.latency import LatencyTracker
 
