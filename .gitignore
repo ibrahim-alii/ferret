@@ -67,3 +67,4 @@ logs/
 # Build artifacts
 *.pyc
 *.pyo
+plans/
