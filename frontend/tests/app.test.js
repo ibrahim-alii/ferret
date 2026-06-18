@@ -155,6 +155,109 @@ describe('AppState', () => {
   });
 });
 
+// ─── arxiv submit + ingestion polling ────────────────────────────────────────
+
+describe('submitArxivId (exported helper)', () => {
+  it('test_arxiv_id_submit_calls_post_papers_and_shows_ingesting_status', async () => {
+    const { submitArxivId } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    const status = { text: '' };
+    const onStatus = (t) => { status.text = t; };
+
+    await submitArxivId('2301.00001', { onStatus, onPollStart: vi.fn() });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/papers'),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('2301.00001'),
+      })
+    );
+    expect(status.text).toMatch(/ingest/i);
+  });
+});
+
+describe('checkIngestionStatus (exported helper)', () => {
+  it('test_ingestion_status_polling_transitions_to_ready_state — full resolves ready', async () => {
+    const { checkIngestionStatus } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'full', id: 'paper-1' }),
+    });
+
+    const result = await checkIngestionStatus('2301.00001');
+    expect(result.status).toBe('full');
+    expect(result.ready).toBe(true);
+  });
+
+  it('returns ready=false for pending status', async () => {
+    const { checkIngestionStatus } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'processing', id: 'paper-1' }),
+    });
+
+    const result = await checkIngestionStatus('2301.00001');
+    expect(result.ready).toBe(false);
+    expect(result.failed).toBe(false);
+  });
+
+  it('returns failed=true for failed status', async () => {
+    const { checkIngestionStatus } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'failed', id: 'paper-1' }),
+    });
+
+    const result = await checkIngestionStatus('2301.00001');
+    expect(result.failed).toBe(true);
+    expect(result.ready).toBe(false);
+  });
+});
+
+describe('loadSessionHistory (exported helper)', () => {
+  it('test_chat_history_loaded_on_session_resume — calls GET /sessions/{id}/messages', async () => {
+    const { loadSessionHistory } = await import('../static/app.js');
+
+    const messages = [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'World' },
+    ];
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => messages,
+    });
+
+    const received = [];
+    await loadSessionHistory('sess-abc', (msg) => received.push(msg));
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/sess-abc/messages')
+    );
+    expect(received).toHaveLength(2);
+    expect(received[0]).toEqual({ role: 'user', content: 'Hello' });
+  });
+
+  it('returns empty on fetch error without throwing', async () => {
+    const { loadSessionHistory } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+
+    const received = [];
+    await loadSessionHistory('sess-missing', (msg) => received.push(msg));
+    expect(received).toHaveLength(0);
+  });
+});
+
 // ─── SSE fetch stream integration (mocked fetch) ─────────────────────────────
 
 describe('consumeSSEStream', () => {

@@ -164,6 +164,55 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
 
 const BACKEND = (typeof window !== 'undefined' && window.__BACKEND_URL__) || '';
 
+/**
+ * POST arxiv_id to /papers, then call onStatus and onPollStart callbacks.
+ * Exported for testing.
+ */
+export async function submitArxivId(arxivId, { onStatus, onPollStart } = {}) {
+  onStatus && onStatus('Submitting…');
+  const res = await fetch(`${BACKEND}/papers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ arxiv_id: arxivId }),
+  });
+  if (!res.ok) throw new Error(`POST /papers → ${res.status}`);
+  onStatus && onStatus('Ingesting paper…');
+  onPollStart && onPollStart(arxivId);
+  return res.json();
+}
+
+/**
+ * GET /papers/{arxivId} and return { status, id, ready, failed }.
+ * ready=true when status is 'full' or 'abstract_only'.
+ * Exported for testing.
+ */
+export async function checkIngestionStatus(arxivId) {
+  const res = await fetch(`${BACKEND}/papers/${arxivId}`);
+  if (!res.ok) throw new Error(`GET /papers/${arxivId} → ${res.status}`);
+  const paper = await res.json();
+  const ready = paper.status === 'full' || paper.status === 'abstract_only';
+  const failed = paper.status === 'failed';
+  return { ...paper, ready, failed };
+}
+
+/**
+ * GET /sessions/{sessionId}/messages and call onMessage for each.
+ * Silently returns empty on error (session may not have history).
+ * Exported for testing.
+ */
+export async function loadSessionHistory(sessionId, onMessage) {
+  try {
+    const res = await fetch(`${BACKEND}/sessions/${sessionId}/messages`);
+    if (!res.ok) return;
+    const messages = await res.json();
+    for (const msg of messages) {
+      onMessage && onMessage(msg);
+    }
+  } catch {
+    // non-fatal
+  }
+}
+
 async function apiPost(path, body) {
   const res = await fetch(`${BACKEND}${path}`, {
     method: 'POST',
@@ -214,6 +263,10 @@ function initApp() {
     try {
       const data = await apiPost('/sessions', { mode: 'ask' });
       state.setSession(data.session_id || data.id);
+      await loadSessionHistory(state.sessionId, (msg) => {
+        chatList.appendChild(buildMessageEl(msg.role, msg.content));
+      });
+      scrollBottom();
       enableChat(chatInput, chatBtn);
     } catch {
       statusEl.textContent = 'Failed to create session.';
@@ -232,23 +285,23 @@ function initApp() {
   });
 
   // ── arxiv submission ──
-  arxivBtn.addEventListener('click', () => submitArxiv());
+  arxivBtn.addEventListener('click', () => startArxivSubmit());
   arxivInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitArxiv();
+    if (e.key === 'Enter') startArxivSubmit();
   });
 
-  async function submitArxiv() {
+  async function startArxivSubmit() {
     const arxivId = arxivInput.value.trim();
     if (!arxivId) return;
 
-    statusEl.textContent = 'Submitting…';
     disableChat(chatInput, chatBtn);
     arxivBtn.disabled = true;
 
     try {
-      await apiPost('/papers', { arxiv_id: arxivId });
-      statusEl.textContent = 'Ingesting paper…';
-      pollIngestion(arxivId);
+      await submitArxivId(arxivId, {
+        onStatus: (t) => { statusEl.textContent = t; },
+        onPollStart: (id) => pollIngestion(id),
+      });
     } catch {
       statusEl.textContent = 'Failed to submit paper. Check the arxiv ID.';
       arxivBtn.disabled = false;
@@ -259,10 +312,10 @@ function initApp() {
     if (state.pollingTimer) clearInterval(state.pollingTimer);
     state.pollingTimer = setInterval(async () => {
       try {
-        const paper = await apiGet(`/papers/${arxivId}`);
+        const paper = await checkIngestionStatus(arxivId);
         state.setIngestionStatus(paper.status);
 
-        if (paper.status === 'full' || paper.status === 'abstract_only') {
+        if (paper.ready) {
           clearInterval(state.pollingTimer);
           statusEl.textContent = `Ready (${paper.status})`;
           const sess = await apiPost('/sessions', {
@@ -270,9 +323,13 @@ function initApp() {
             paper_id: paper.id || arxivId,
           });
           state.setSession(sess.session_id || sess.id);
+          await loadSessionHistory(state.sessionId, (msg) => {
+            chatList.appendChild(buildMessageEl(msg.role, msg.content));
+          });
+          scrollBottom();
           enableChat(chatInput, chatBtn);
           arxivBtn.disabled = false;
-        } else if (paper.status === 'failed') {
+        } else if (paper.failed) {
           clearInterval(state.pollingTimer);
           statusEl.textContent = 'Ingestion failed. Try another ID.';
           arxivBtn.disabled = false;
