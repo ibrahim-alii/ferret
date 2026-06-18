@@ -57,6 +57,7 @@ logs/
 
 # Claude Code 
 .claude/
+CLAUDE.md
 
 # Mypy / type checkers
 .mypy_cache/

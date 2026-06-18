@@ -500,7 +500,7 @@ class TestIngest:
         upsert_mock.assert_called_once()
         upserted = upsert_mock.call_args[0][0]
         assert len(upserted) == 1
-        assert upserted[0]["chunk_type"] == "child"
+        assert upserted[0].chunk_type == "child"
 
     @pytest.mark.asyncio
     async def test_upsert_called_with_correct_chunkvector_fields(self):
@@ -536,11 +536,11 @@ class TestIngest:
 
         upsert_mock.assert_called_once()
         cv = upsert_mock.call_args[0][0][0]
-        assert "dense_vector" in cv
-        assert "text" in cv
-        assert "sparse_vector" not in cv
-        assert cv["chunk_type"] == "child"
-        assert cv["section_name"] == "Methods"
+        assert hasattr(cv, "dense_vector")
+        assert hasattr(cv, "text")
+        assert not hasattr(cv, "sparse_vector")
+        assert cv.chunk_type == "child"
+        assert cv.section_name == "Methods"
 
     @pytest.mark.asyncio
     async def test_ingest_paper_marks_status_full_on_success(self):

@@ -13,7 +13,7 @@ import typer
 import uvicorn
 
 from backend.db import run_create_all
-from backend.vectorstore.client import ensure_collection
+from backend.vectorstore.store import ensure_collection
 from backend.ingestion.pipeline import ingest_paper
 from backend.graph.chain import astream_chat
 from evals.run_all import run_all

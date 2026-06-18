@@ -112,9 +112,9 @@ async def _hybrid_search(
     query_text: str,
     paper_id: str | None,
     limit: int,
+    use_sparse: bool = True,
 ) -> list[ScoredChunk]:
     name = _collection_name()
-    sparse_vec = await asyncio.to_thread(encode_query, query_text)
 
     qfilter: Filter | None = None
     if paper_id is not None:
@@ -122,19 +122,30 @@ async def _hybrid_search(
             must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id))]
         )
 
-    prefetch = [
-        Prefetch(query=query_dense, using=_DENSE_NAME, limit=limit * 2),
-        Prefetch(
-            query=SparseVector(indices=sparse_vec.indices, values=sparse_vec.values),
-            using=_SPARSE_NAME,
-            limit=limit * 2,
-        ),
-    ]
+    if use_sparse:
+        sparse_vec = await asyncio.to_thread(encode_query, query_text)
+        prefetch: list[Prefetch] = [
+            Prefetch(query=query_dense, using=_DENSE_NAME, limit=limit * 2),
+            Prefetch(
+                query=SparseVector(indices=sparse_vec.indices, values=sparse_vec.values),
+                using=_SPARSE_NAME,
+                limit=limit * 2,
+            ),
+        ]
+        query_arg: FusionQuery | list[float] = FusionQuery(fusion=Fusion.RRF)
+        prefetch_arg: list[Prefetch] | None = prefetch
+        using_arg: str | None = None
+    else:
+        # Dense-only: issue a direct ANN query; no prefetch or RRF needed.
+        prefetch_arg = None
+        query_arg = query_dense
+        using_arg = _DENSE_NAME
 
     response = await client.query_points(
         collection_name=name,
-        prefetch=prefetch,
-        query=FusionQuery(fusion=Fusion.RRF),
+        prefetch=prefetch_arg,
+        query=query_arg,
+        using=using_arg,
         limit=limit,
         query_filter=qfilter,
         with_payload=True,
@@ -174,11 +185,13 @@ async def hybrid_search(
     query_text: str,
     paper_id: str | None,
     limit: int,
+    use_sparse: bool = True,
 ) -> list[ScoredChunk]:
     """Server-side RRF hybrid search. Consumed by module 3 (retrieval).
 
     paper_id=None -> Ask mode (search all papers).
     paper_id=<id> -> Deep Dive mode (filter to one paper).
+    use_sparse=False -> dense-only (for eval comparison).
     """
     async with get_client() as client:
-        return await _hybrid_search(client, query_dense, query_text, paper_id, limit)
+        return await _hybrid_search(client, query_dense, query_text, paper_id, limit, use_sparse)
