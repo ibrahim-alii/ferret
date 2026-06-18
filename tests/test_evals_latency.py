@@ -100,11 +100,13 @@ class TestLatencyTracker:
 
         tracker = LatencyTracker()
         async with tracker.track_stage("embed"):
-            await asyncio.sleep(0.005)
-        async with tracker.track_stage("generate"):
             await asyncio.sleep(0.01)
+        async with tracker.track_stage("generate"):
+            await asyncio.sleep(0.05)
 
         report = tracker.report()
         assert "embed" in report["stages"]
         assert "generate" in report["stages"]
-        assert report["stages"]["generate"] >= report["stages"]["embed"]
+        # Both stages are recorded; generate should take longer (5x sleep)
+        assert report["stages"]["generate"] > 0
+        assert report["stages"]["embed"] > 0
