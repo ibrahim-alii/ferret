@@ -24,6 +24,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
+from backend.vectorstore.client import get_client
 from backend.vectorstore.models import ChunkVector, ScoredChunk
 from backend.vectorstore.sparse import encode_document, encode_query
 
@@ -52,7 +53,13 @@ def _batched(iterable: Iterable[T], n: int) -> Iterator[list[T]]:
         yield chunk
 
 
+# ---------------------------------------------------------------------------
+# Internal implementations (accept an injected client — used by unit tests)
+# ---------------------------------------------------------------------------
+
+
 async def ensure_collection(client: AsyncQdrantClient) -> None:
+    """Create the Qdrant collection with dense + sparse named vectors, idempotently."""
     name = _collection_name()
     if await client.collection_exists(collection_name=name):
         return
@@ -67,7 +74,7 @@ async def ensure_collection(client: AsyncQdrantClient) -> None:
     )
 
 
-async def upsert_chunks(client: AsyncQdrantClient, chunks: list[ChunkVector]) -> None:
+async def _upsert_chunks(client: AsyncQdrantClient, chunks: list[ChunkVector]) -> None:
     name = _collection_name()
     for batch in _batched(chunks, _BATCH_SIZE):
         points: list[PointStruct] = []
@@ -99,7 +106,7 @@ async def upsert_chunks(client: AsyncQdrantClient, chunks: list[ChunkVector]) ->
             raise
 
 
-async def hybrid_search(
+async def _hybrid_search(
     client: AsyncQdrantClient,
     query_dense: list[float],
     query_text: str,
@@ -149,3 +156,29 @@ async def hybrid_search(
             )
         )
     return results
+
+
+# ---------------------------------------------------------------------------
+# Public API (as per PLAN.md contract — no client parameter)
+# ---------------------------------------------------------------------------
+
+
+async def upsert_chunks(chunks: list[ChunkVector]) -> None:
+    """Batch-upsert chunks into Qdrant. Consumed by module 1 (ingestion)."""
+    async with get_client() as client:
+        await _upsert_chunks(client, chunks)
+
+
+async def hybrid_search(
+    query_dense: list[float],
+    query_text: str,
+    paper_id: str | None,
+    limit: int,
+) -> list[ScoredChunk]:
+    """Server-side RRF hybrid search. Consumed by module 3 (retrieval).
+
+    paper_id=None -> Ask mode (search all papers).
+    paper_id=<id> -> Deep Dive mode (filter to one paper).
+    """
+    async with get_client() as client:
+        return await _hybrid_search(client, query_dense, query_text, paper_id, limit)

@@ -189,7 +189,7 @@ class TestEnsureCollection:
 class TestUpsertChunks:
     @pytest.mark.asyncio
     async def test_upsert_generates_sparse_from_text(self):
-        from backend.vectorstore.store import upsert_chunks
+        from backend.vectorstore.store import _upsert_chunks
 
         chunk = _make_chunk_vector(text="neural network training")
         mock_client = AsyncMock()
@@ -197,12 +197,12 @@ class TestUpsertChunks:
 
         with patch("backend.vectorstore.store.encode_document") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([1], [1.0])
-            await upsert_chunks(mock_client, [chunk])
+            await _upsert_chunks(mock_client, [chunk])
             mock_enc.assert_called_once_with("neural network training")
 
     @pytest.mark.asyncio
     async def test_upsert_chunks_sends_correct_payload_fields(self):
-        from backend.vectorstore.store import upsert_chunks
+        from backend.vectorstore.store import _upsert_chunks
 
         chunk = _make_chunk_vector(
             chunk_id="c99",
@@ -216,7 +216,7 @@ class TestUpsertChunks:
 
         with patch("backend.vectorstore.store.encode_document") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            await upsert_chunks(mock_client, [chunk])
+            await _upsert_chunks(mock_client, [chunk])
 
         call_args = mock_client.upsert.call_args
         points = call_args.kwargs.get("points") or call_args.args[1]
@@ -230,7 +230,7 @@ class TestUpsertChunks:
 
     @pytest.mark.asyncio
     async def test_upsert_chunks_batches_large_input(self):
-        from backend.vectorstore.store import upsert_chunks
+        from backend.vectorstore.store import _upsert_chunks
 
         chunks = [_make_chunk_vector(chunk_id=str(i)) for i in range(250)]
         mock_client = AsyncMock()
@@ -238,10 +238,30 @@ class TestUpsertChunks:
 
         with patch("backend.vectorstore.store.encode_document") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            await upsert_chunks(mock_client, chunks)
+            await _upsert_chunks(mock_client, chunks)
 
         # 250 chunks / batch_size 100 = 3 batches
         assert mock_client.upsert.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_public_upsert_chunks_uses_get_client(self):
+        """Public API must not require a caller-supplied client (PLAN.md contract)."""
+        from backend.vectorstore.store import upsert_chunks
+
+        chunk = _make_chunk_vector(text="public api test")
+        mock_client = AsyncMock()
+        mock_client.upsert = AsyncMock()
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("backend.vectorstore.store.get_client", return_value=cm):
+            with patch("backend.vectorstore.store.encode_document") as mock_enc:
+                mock_enc.return_value = _make_sparse_vector([0], [1.0])
+                await upsert_chunks([chunk])
+
+        mock_client.upsert.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -252,19 +272,19 @@ class TestUpsertChunks:
 class TestHybridSearch:
     @pytest.mark.asyncio
     async def test_hybrid_search_generates_sparse_from_query_text(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
 
         mock_client = AsyncMock()
         mock_client.query_points = AsyncMock(return_value=MagicMock(points=[]))
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([1, 2], [0.6, 0.4])
-            await hybrid_search(mock_client, [0.1] * 1024, "deep learning", None, 5)
+            await _hybrid_search(mock_client, [0.1] * 1024, "deep learning", None, 5)
             mock_enc.assert_called_once_with("deep learning")
 
     @pytest.mark.asyncio
     async def test_hybrid_search_builds_prefetch_rrf_query(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
         from qdrant_client.models import FusionQuery, Fusion
 
         mock_client = AsyncMock()
@@ -272,7 +292,7 @@ class TestHybridSearch:
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([1], [1.0])
-            await hybrid_search(mock_client, [0.1] * 1024, "graph neural network", None, 10)
+            await _hybrid_search(mock_client, [0.1] * 1024, "graph neural network", None, 10)
 
         mock_client.query_points.assert_called_once()
         call_kwargs = mock_client.query_points.call_args.kwargs
@@ -287,14 +307,14 @@ class TestHybridSearch:
 
     @pytest.mark.asyncio
     async def test_hybrid_search_with_paper_id_filter_applies_filter(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
 
         mock_client = AsyncMock()
         mock_client.query_points = AsyncMock(return_value=MagicMock(points=[]))
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            await hybrid_search(mock_client, [0.1] * 1024, "attention", "paper_xyz", 5)
+            await _hybrid_search(mock_client, [0.1] * 1024, "attention", "paper_xyz", 5)
 
         call_kwargs = mock_client.query_points.call_args.kwargs
         qfilter = call_kwargs.get("query_filter")
@@ -302,14 +322,14 @@ class TestHybridSearch:
 
     @pytest.mark.asyncio
     async def test_hybrid_search_without_paper_id_has_no_filter(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
 
         mock_client = AsyncMock()
         mock_client.query_points = AsyncMock(return_value=MagicMock(points=[]))
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            await hybrid_search(mock_client, [0.1] * 1024, "attention", None, 5)
+            await _hybrid_search(mock_client, [0.1] * 1024, "attention", None, 5)
 
         call_kwargs = mock_client.query_points.call_args.kwargs
         qfilter = call_kwargs.get("query_filter")
@@ -317,7 +337,7 @@ class TestHybridSearch:
 
     @pytest.mark.asyncio
     async def test_hybrid_search_returns_top_n(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
 
         results = [_make_scored_result(chunk_id=str(i), score=1.0 - i * 0.1) for i in range(5)]
         mock_client = AsyncMock()
@@ -325,7 +345,7 @@ class TestHybridSearch:
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            out = await hybrid_search(mock_client, [0.1] * 1024, "query", None, 5)
+            out = await _hybrid_search(mock_client, [0.1] * 1024, "query", None, 5)
 
         assert len(out) == 5
         call_kwargs = mock_client.query_points.call_args.kwargs
@@ -333,20 +353,20 @@ class TestHybridSearch:
 
     @pytest.mark.asyncio
     async def test_hybrid_search_returns_empty_list_when_no_matches(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
 
         mock_client = AsyncMock()
         mock_client.query_points = AsyncMock(return_value=MagicMock(points=[]))
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            out = await hybrid_search(mock_client, [0.1] * 1024, "obscure query", None, 10)
+            out = await _hybrid_search(mock_client, [0.1] * 1024, "obscure query", None, 10)
 
         assert out == []
 
     @pytest.mark.asyncio
     async def test_hybrid_search_returns_scored_chunks(self):
-        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.store import _hybrid_search
         from backend.vectorstore.models import ScoredChunk
 
         results = [_make_scored_result("c1", "p1", 0.95)]
@@ -355,13 +375,36 @@ class TestHybridSearch:
 
         with patch("backend.vectorstore.store.encode_query") as mock_enc:
             mock_enc.return_value = _make_sparse_vector([0], [1.0])
-            out = await hybrid_search(mock_client, [0.1] * 1024, "query", None, 5)
+            out = await _hybrid_search(mock_client, [0.1] * 1024, "query", None, 5)
 
         assert len(out) == 1
         assert isinstance(out[0], ScoredChunk)
         assert out[0].chunk_id == "c1"
         assert out[0].paper_id == "p1"
         assert out[0].score == 0.95
+
+    @pytest.mark.asyncio
+    async def test_public_hybrid_search_uses_get_client(self):
+        """Public API must not require a caller-supplied client (PLAN.md contract)."""
+        from backend.vectorstore.store import hybrid_search
+        from backend.vectorstore.models import ScoredChunk
+
+        mock_client = AsyncMock()
+        mock_client.query_points = AsyncMock(
+            return_value=MagicMock(points=[_make_scored_result("c1", "p1", 0.8)])
+        )
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("backend.vectorstore.store.get_client", return_value=cm):
+            with patch("backend.vectorstore.store.encode_query") as mock_enc:
+                mock_enc.return_value = _make_sparse_vector([0], [1.0])
+                out = await hybrid_search([0.1] * 1024, "test query", None, 5)
+
+        assert len(out) == 1
+        assert isinstance(out[0], ScoredChunk)
 
 
 # ---------------------------------------------------------------------------
@@ -378,10 +421,10 @@ class TestIntegration:
 
         async with get_client() as client:
             await ensure_collection(client)
-            chunks = [_make_chunk_vector(chunk_id="integ-1", text="large language models")]
-            await upsert_chunks(client, chunks)
-            results = await hybrid_search(client, [0.1] * 1024, "language models", None, 5)
-            assert isinstance(results, list)
+        chunks = [_make_chunk_vector(chunk_id="integ-1", text="large language models")]
+        await upsert_chunks(chunks)
+        results = await hybrid_search([0.1] * 1024, "language models", None, 5)
+        assert isinstance(results, list)
 
     @pytest.mark.asyncio
     async def test_real_qdrant_hybrid_search_paper_id_filter(self):
@@ -390,11 +433,11 @@ class TestIntegration:
 
         async with get_client() as client:
             await ensure_collection(client)
-            chunks = [_make_chunk_vector(chunk_id="integ-2", paper_id="paper-A", text="attention")]
-            await upsert_chunks(client, chunks)
-            results = await hybrid_search(client, [0.1] * 1024, "attention", "paper-A", 5)
-            for r in results:
-                assert r.paper_id == "paper-A"
+        chunks = [_make_chunk_vector(chunk_id="integ-2", paper_id="paper-A", text="attention")]
+        await upsert_chunks(chunks)
+        results = await hybrid_search([0.1] * 1024, "attention", "paper-A", 5)
+        for r in results:
+            assert r.paper_id == "paper-A"
 
     @pytest.mark.asyncio
     async def test_real_qdrant_server_side_rrf_returns_fused_ranking(self):
@@ -403,6 +446,6 @@ class TestIntegration:
 
         async with get_client() as client:
             await ensure_collection(client)
-            results = await hybrid_search(client, [0.1] * 1024, "transformer", None, 3)
-            scores = [r.score for r in results]
-            assert scores == sorted(scores, reverse=True)
+        results = await hybrid_search([0.1] * 1024, "transformer", None, 3)
+        scores = [r.score for r in results]
+        assert scores == sorted(scores, reverse=True)

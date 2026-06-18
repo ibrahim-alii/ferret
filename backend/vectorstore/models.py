@@ -9,7 +9,7 @@ class ChunkVector:
     paper_id: str
     section_name: str
     chunk_type: str
-    dense_vector: tuple[float, ...]
+    dense_vector: list[float]
     text: str
 
 
