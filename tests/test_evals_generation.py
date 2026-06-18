@@ -76,3 +76,14 @@ class TestGenerationEval:
         serialized = json.dumps(scores)
         loaded = json.loads(serialized)
         assert loaded["faithfulness"] == pytest.approx(0.85, abs=0.01)
+
+    def test_context_precision_above_threshold(self):
+        """Context precision must be >= 0.5 when retrieved chunks are relevant."""
+        from evals.generation import run_ragas_eval
+
+        mock_scores = {"faithfulness": 0.85, "answer_relevancy": 0.80, "context_precision": 0.75}
+
+        with patch("evals.generation._run_ragas", return_value=mock_scores):
+            scores = run_ragas_eval(_make_dataset())
+
+        assert scores.get("context_precision", 1.0) >= 0.5

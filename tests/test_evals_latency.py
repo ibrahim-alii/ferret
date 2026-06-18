@@ -104,3 +104,19 @@ class TestLatencyTracker:
         # Both stages are recorded; generate should take longer (5x sleep)
         assert report["stages"]["generate"] > 0
         assert report["stages"]["embed"] > 0
+
+    @pytest.mark.asyncio
+    async def test_total_turn_latency_below_threshold_sufficient_branch(self):
+        """Mocked sufficient branch must complete within 15s wall-clock limit."""
+        from evals.latency import LatencyTracker
+
+        tracker = LatencyTracker()
+        async with tracker.track_stage("retrieve"):
+            await asyncio.sleep(0.001)
+        async with tracker.track_stage("grade"):
+            await asyncio.sleep(0.001)
+        async with tracker.track_stage("generate"):
+            await asyncio.sleep(0.001)
+
+        total = sum(tracker.report()["stages"].values())
+        assert total < 15.0

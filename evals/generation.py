@@ -23,7 +23,7 @@ def build_ragas_dataset(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _run_ragas(dataset: list[dict[str, Any]]) -> dict[str, float]:
     """Run RAGAS evaluation configured with Groq + Voyage."""
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import faithfulness, answer_relevancy
+    from ragas.metrics import faithfulness, answer_relevancy, context_precision
     from langchain_groq import ChatGroq
     from langchain_community.embeddings import VoyageAIEmbeddings
     from datasets import Dataset
@@ -42,7 +42,7 @@ def _run_ragas(dataset: list[dict[str, Any]]) -> dict[str, float]:
     hf_dataset = Dataset.from_list(dataset)
     result = ragas_evaluate(
         hf_dataset,
-        metrics=[faithfulness, answer_relevancy],
+        metrics=[faithfulness, answer_relevancy, context_precision],
         llm=llm,
         embeddings=embeddings,
     )

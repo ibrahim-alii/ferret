@@ -96,3 +96,18 @@ class TestAttribution:
             result = attribute_answer(answer, chunks)
 
         assert result["chunk_utilization_rate"] == pytest.approx(2 / 3, abs=0.01)
+
+    def test_attribution_embeds_sentences_via_voyage(self):
+        """attribute_answer must call _embed_texts with sentences + chunks batched."""
+        from evals.attribution import attribute_answer
+
+        answer = "Sentence one. Sentence two."
+        chunks = [{"chunk_id": "c1", "text": "Sentence one."}]
+
+        with patch("evals.attribution._embed_texts", return_value=[[1.0, 0.0]] * 3) as mock_embed:
+            attribute_answer(answer, chunks)
+
+        # Single batched call with all texts (sentences + chunk)
+        assert mock_embed.call_count == 1
+        call_texts = mock_embed.call_args[0][0]
+        assert len(call_texts) == 3  # 2 sentences + 1 chunk

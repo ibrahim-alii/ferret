@@ -69,3 +69,15 @@ class TestGradingEval:
         assert "accuracy" in metrics
         assert "fnr" in metrics
         assert "fpr" in metrics
+
+    def test_score_threshold_calibration_plot_generated(self, tmp_path):
+        """plot_score_distribution must create a PNG file at the given path."""
+        from evals.grading import plot_score_distribution
+
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        output = tmp_path / "calibration.png"
+
+        plot_score_distribution(scores, output)
+
+        assert output.exists()
+        assert output.stat().st_size > 0

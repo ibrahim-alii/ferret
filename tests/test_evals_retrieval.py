@@ -73,3 +73,32 @@ class TestRetrievalEval:
         loaded = json.loads(serialized)
         assert "runs" in loaded
         assert set(loaded["runs"].keys()) == {"dense", "hybrid", "hybrid_rerank"}
+
+    def test_dense_only_run_lower_ndcg_than_hybrid_run(self):
+        """Hypothesis: hybrid >= dense on ndcg@5. Log result — not always guaranteed."""
+        from evals.retrieval import compute_metrics
+
+        qrels_dict = {"q1": {"c1": 1, "c2": 1}}
+        # Dense-only misses c2; hybrid surfaces it
+        dense_run = {"q1": {"c1": 1.0, "c3": 0.5}}
+        hybrid_run = {"q1": {"c1": 1.0, "c2": 0.9, "c3": 0.5}}
+
+        dense_metrics = compute_metrics(qrels_dict, dense_run)
+        hybrid_metrics = compute_metrics(qrels_dict, hybrid_run)
+
+        # Log result; not a hard assertion since it depends on data
+        assert hybrid_metrics["ndcg@5"] >= dense_metrics["ndcg@5"]
+
+    def test_hybrid_run_lower_ndcg_than_hybrid_plus_rerank_run(self):
+        """Hypothesis: reranked >= hybrid on ndcg@5 when rerank promotes the right doc."""
+        from evals.retrieval import compute_metrics
+
+        qrels_dict = {"q1": {"c1": 1}}
+        # Hybrid ranks c2 first (wrong); rerank corrects order to c1 first
+        hybrid_run = {"q1": {"c2": 1.0, "c1": 0.5}}
+        rerank_run = {"q1": {"c1": 1.0, "c2": 0.5}}
+
+        hybrid_metrics = compute_metrics(qrels_dict, hybrid_run)
+        rerank_metrics = compute_metrics(qrels_dict, rerank_run)
+
+        assert rerank_metrics["ndcg@5"] >= hybrid_metrics["ndcg@5"]
