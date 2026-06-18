@@ -132,21 +132,35 @@ async def ingest_paper(arxiv_id: str) -> PaperRecord:
 
 
 async def _fetch_content(arxiv_id: str) -> tuple[str | None, bytes | None]:
-    """Fetch HTML and PDF concurrently; soft-fail each independently."""
-    html_task = asyncio.create_task(fetch_html(arxiv_id))
-    pdf_task = asyncio.create_task(download_pdf(arxiv_id))
+    """
+    Fetch paper content.
+    ARXIV_PREFER_HTML=true (default): fetch HTML and PDF concurrently; parser tries HTML first.
+    ARXIV_PREFER_HTML=false: skip HTML, fetch PDF only (for older papers or PDF-only submissions).
+    Each fetch soft-fails independently.
+    """
+    import os as _os
+    prefer_html = _os.environ.get("ARXIV_PREFER_HTML", "true").lower() not in ("false", "0", "no")
 
     html_content: str | None = None
     pdf_bytes: bytes | None = None
 
-    try:
-        html_content = await html_task
-    except Exception as exc:
-        log.warning("HTML fetch failed for %s: %s", arxiv_id, exc)
+    if prefer_html:
+        html_task = asyncio.create_task(fetch_html(arxiv_id))
+        pdf_task = asyncio.create_task(download_pdf(arxiv_id))
 
-    try:
-        pdf_bytes = await pdf_task
-    except Exception as exc:
-        log.warning("PDF fetch failed for %s: %s", arxiv_id, exc)
+        try:
+            html_content = await html_task
+        except Exception as exc:
+            log.warning("HTML fetch failed for %s: %s", arxiv_id, exc)
+
+        try:
+            pdf_bytes = await pdf_task
+        except Exception as exc:
+            log.warning("PDF fetch failed for %s: %s", arxiv_id, exc)
+    else:
+        try:
+            pdf_bytes = await download_pdf(arxiv_id)
+        except Exception as exc:
+            log.warning("PDF fetch failed for %s: %s", arxiv_id, exc)
 
     return html_content, pdf_bytes

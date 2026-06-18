@@ -102,6 +102,46 @@ class TestFetchMetadata:
                 await fetch_metadata("9999.99999")
 
     @pytest.mark.asyncio
+    async def test_arxiv_prefer_html_false_skips_html_fetch(self):
+        """When ARXIV_PREFER_HTML=false, fetch_html is never called."""
+        from backend.ingestion import ingest
+
+        fetch_html_mock = AsyncMock(return_value="<html/>")
+        fetch_pdf_mock = AsyncMock(return_value=b"")
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none = MagicMock(return_value=None)
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+        mock_session.commit = AsyncMock()
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.dict("os.environ", {"ARXIV_PREFER_HTML": "false"}),
+            patch("backend.ingestion.ingest.fetch_metadata", AsyncMock(return_value={
+                "title": "T", "abstract": "A", "authors": ["X"],
+                "published_date": "2023-01-01T00:00:00Z",
+            })),
+            patch("backend.ingestion.ingest.fetch_html", fetch_html_mock),
+            patch("backend.ingestion.ingest.download_pdf", fetch_pdf_mock),
+            patch("backend.ingestion.ingest.parse", return_value=[]),
+            patch("backend.ingestion.ingest.filter_sections", return_value=[]),
+            patch("backend.ingestion.ingest.chunk_sections", return_value=([], [])),
+            patch("backend.ingestion.ingest.embed_chunks", AsyncMock(return_value=[])),
+            patch("backend.ingestion.ingest.upsert_chunks", AsyncMock()),
+            patch("backend.ingestion.ingest.async_session", return_value=mock_ctx),
+        ):
+            await ingest.ingest_paper("2301.00001")
+
+        fetch_html_mock.assert_not_called()
+        fetch_pdf_mock.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_download_and_metadata_fetch_run_concurrently(self):
         """asyncio.gather is used so both calls start before either finishes."""
         from backend.ingestion import ingest
@@ -256,6 +296,20 @@ class TestFilter:
         assert "Introduction" in names
         assert "Methods" in names
         assert "CustomNoise" not in names
+
+    def test_section_filter_drops_equation_only_sections(self):
+        """Sections with almost no prose after stripping LaTeX are dropped."""
+        from backend.ingestion.filter import filter_sections
+
+        equation_section = ("Proof", "$x^2 + y^2 = z^2$ \\sum_{i} x_i")
+        prose_section = ("Methods", "We ran experiments on three datasets. " * 10)
+        result = filter_sections(
+            [equation_section, prose_section],
+            equation_min_prose_chars=100,
+        )
+        names = [s[0] for s in result]
+        assert "Proof" not in names
+        assert "Methods" in names
 
 
 # ---------------------------------------------------------------------------
