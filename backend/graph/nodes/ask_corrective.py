@@ -3,10 +3,10 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 
-import groq
 import httpx
 
 from backend.graph.ingestion_graph import run_ingestion
+from backend.graph.nodes._llm import groq_complete
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,7 @@ async def ask_corrective_node(state: dict) -> dict:
     ]
 
     # Generate diverse queries
-    client = groq.AsyncGroq()
-    completion = await client.chat.completions.create(
+    content = await groq_complete(
         model=grading_model,
         messages=[
             {
@@ -70,7 +69,7 @@ async def ask_corrective_node(state: dict) -> dict:
         ],
         max_tokens=200,
     )
-    raw_queries = completion.choices[0].message.content.strip().splitlines()
+    raw_queries = content.strip().splitlines()
     queries = [q.strip() for q in raw_queries if q.strip()][:query_count]
 
     # Search concurrently
@@ -96,40 +95,42 @@ async def ask_corrective_node(state: dict) -> dict:
             f"ID: {p['arxiv_id']}\nTitle: {p['title']}\nAbstract: {p['abstract'][:300]}"
             for p in pool
         )
-        relevance_completion = await client.chat.completions.create(
-            model=grading_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a relevance filter. Given a user question and a list of papers "
-                        "(each with an ID, title, and abstract), return a comma-separated list of "
-                        "the arxiv IDs that are relevant to the question. "
-                        "Return only the IDs, nothing else. If none are relevant, return an empty string."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Question: {user_message}\n\nPapers:\n{candidates_text}",
-                },
-            ],
-            max_tokens=200,
-        )
-        raw_ids = relevance_completion.choices[0].message.content.strip()
+        raw_ids = (
+            await groq_complete(
+                model=grading_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a relevance filter. Given a user question and a list of papers "
+                            "(each with an ID, title, and abstract), return a comma-separated list of "
+                            "the arxiv IDs that are relevant to the question. "
+                            "Return only the IDs, nothing else. If none are relevant, return an empty string."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {user_message}\n\nPapers:\n{candidates_text}",
+                    },
+                ],
+                max_tokens=200,
+            )
+        ).strip()
         relevant_ids = {rid.strip() for rid in raw_ids.split(",") if rid.strip()}
 
     # If relevance check returned nothing useful, fall back to the pool
     if not relevant_ids:
         relevant_ids = {p["arxiv_id"] for p in pool}
 
-    # Ingest only relevant papers up to ingest_candidates; log any failures but do not abort
+    # Ingest only relevant papers up to ingest_candidates. Run sequentially: each
+    # ingestion makes batched Voyage embedding calls, and the user already sees the
+    # interim "searching..." message, so fanning these out concurrently would only
+    # risk tripping the embedding rate limit. Log failures but do not abort.
     to_ingest = [p for p in pool if p["arxiv_id"] in relevant_ids][:ingest_candidates]
-    ingest_results = await asyncio.gather(
-        *[run_ingestion(p["arxiv_id"]) for p in to_ingest],
-        return_exceptions=True,
-    )
-    for paper, exc in zip(to_ingest, ingest_results):
-        if isinstance(exc, Exception):
+    for paper in to_ingest:
+        try:
+            await run_ingestion(paper["arxiv_id"])
+        except Exception as exc:
             logger.warning("Failed to ingest paper %r: %s", paper["arxiv_id"], exc)
 
     new_retry_count = retry_count + 1

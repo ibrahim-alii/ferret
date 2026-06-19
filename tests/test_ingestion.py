@@ -545,8 +545,17 @@ class TestIngest:
     @pytest.mark.asyncio
     async def test_ingest_paper_marks_status_full_on_success(self):
         from backend.ingestion import ingest
+        from backend.ingestion.chunker import Chunk as ChunkModel
 
         mock_ctx, _ = self._make_session_ctx(existing_paper=None)
+
+        child = MagicMock(spec=ChunkModel)
+        child.id = 11
+        child.chunk_type = "child"
+        child.section_name = "Introduction"
+        child.text = "intro text"
+        child.parent_chunk_id = 10
+        child.paper_id = 1
 
         with (
             patch("backend.ingestion.ingest.fetch_metadata", AsyncMock(return_value={
@@ -557,8 +566,8 @@ class TestIngest:
             patch("backend.ingestion.ingest.download_pdf", AsyncMock(return_value=b"")),
             patch("backend.ingestion.ingest.parse", return_value=[("Introduction", "text")]),
             patch("backend.ingestion.ingest.filter_sections", return_value=[("Introduction", "text")]),
-            patch("backend.ingestion.ingest.chunk_sections", return_value=([], [])),
-            patch("backend.ingestion.ingest.embed_chunks", AsyncMock(return_value=[])),
+            patch("backend.ingestion.ingest.chunk_sections", return_value=([], [child])),
+            patch("backend.ingestion.ingest.embed_chunks", AsyncMock(return_value=[[0.5] * 1024])),
             patch("backend.ingestion.ingest.upsert_chunks", AsyncMock()),
             patch("backend.ingestion.ingest.async_session", return_value=mock_ctx),
         ):

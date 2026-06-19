@@ -24,7 +24,7 @@ from backend.api.schemas import (
     PostSessionRequest,
     PostSessionResponse,
 )
-from backend.db.models import CitedPaper, Message, Session
+from backend.db.models import CitedPaper, Message, Paper, Session
 from backend.db.session import get_session
 from backend.graph.entrypoint import astream_chat
 
@@ -37,6 +37,14 @@ async def post_session(
     body: PostSessionRequest,
     db: AsyncSession = Depends(get_session),
 ) -> PostSessionResponse:
+    if body.mode == "deep_dive":
+        result = await db.execute(select(Paper).where(Paper.arxiv_id == body.paper_id))
+        paper = result.scalar_one_or_none()
+        if paper is None or paper.ingestion_status not in ("full", "abstract_only"):
+            raise HTTPException(
+                status_code=400, detail="Paper not ingested or not ready for a Deep Dive session"
+            )
+
     session = Session(mode=body.mode, paper_id=body.paper_id)
     db.add(session)
     await db.commit()
@@ -167,6 +175,13 @@ async def _stream(
     except GeneratorExit:
         logger.info("SSE client disconnected for session %s", session.session_id)
         await db.rollback()
+    except Exception:
+        # Any failure inside the graph (LLM/embeddings/rate limits, Qdrant, etc.)
+        # would otherwise close the stream with no output, leaving the client
+        # hanging. Surface it as an error frame and roll back the open transaction.
+        logger.exception("SSE stream failed for session %s", session.session_id)
+        await db.rollback()
+        yield _sse("error", {"message": "The assistant ran into an error. Please try again."})
 
 
 def _sse(event: str, data: dict) -> str:

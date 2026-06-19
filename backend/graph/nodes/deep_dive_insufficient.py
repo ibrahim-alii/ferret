@@ -2,8 +2,9 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 
-import groq
 import httpx
+
+from backend.graph.nodes._llm import groq_complete
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +17,22 @@ async def deep_dive_insufficient_node(state: dict) -> dict:
     user_message = state.get("user_message", "")
 
     # Generate arxiv search query using grading model (NOT generation model)
-    client = groq.AsyncGroq()
-    completion = await client.chat.completions.create(
-        model=grading_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Generate a concise arxiv search query for the following question. "
-                    "Return only the query string, nothing else."
-                ),
-            },
-            {"role": "user", "content": user_message},
-        ],
-        max_tokens=100,
-    )
-    query = completion.choices[0].message.content.strip()
+    query = (
+        await groq_complete(
+            model=grading_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate a concise arxiv search query for the following question. "
+                        "Return only the query string, nothing else."
+                    ),
+                },
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=100,
+        )
+    ).strip()
 
     # Search arxiv
     stream_events: list[dict] = []

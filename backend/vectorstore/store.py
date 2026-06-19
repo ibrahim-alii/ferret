@@ -16,6 +16,7 @@ from qdrant_client.models import (
     Fusion,
     FusionQuery,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     Prefetch,
     SparseIndexParams,
@@ -58,19 +59,24 @@ def _batched(iterable: Iterable[T], n: int) -> Iterator[list[T]]:
 # ---------------------------------------------------------------------------
 
 
-async def ensure_collection(client: AsyncQdrantClient) -> None:
+async def _ensure_collection(client: AsyncQdrantClient) -> None:
     """Create the Qdrant collection with dense + sparse named vectors, idempotently."""
     name = _collection_name()
-    if await client.collection_exists(collection_name=name):
-        return
-    await client.create_collection(
+    if not await client.collection_exists(collection_name=name):
+        await client.create_collection(
+            collection_name=name,
+            vectors_config={
+                _DENSE_NAME: VectorParams(size=_embed_dim(), distance=Distance.COSINE),
+            },
+            sparse_vectors_config={
+                _SPARSE_NAME: SparseVectorParams(index=SparseIndexParams()),
+            },
+        )
+    # Payload index on paper_id is required for Deep Dive's filtered queries. Idempotent.
+    await client.create_payload_index(
         collection_name=name,
-        vectors_config={
-            _DENSE_NAME: VectorParams(size=_embed_dim(), distance=Distance.COSINE),
-        },
-        sparse_vectors_config={
-            _SPARSE_NAME: SparseVectorParams(index=SparseIndexParams()),
-        },
+        field_name="paper_id",
+        field_schema=PayloadSchemaType.KEYWORD,
     )
 
 
@@ -172,6 +178,12 @@ async def _hybrid_search(
 # ---------------------------------------------------------------------------
 # Public API (as per PLAN.md contract — no client parameter)
 # ---------------------------------------------------------------------------
+
+
+async def ensure_collection() -> None:
+    """Create the Qdrant collection idempotently. Consumed by `ferret init`."""
+    async with get_client() as client:
+        await _ensure_collection(client)
 
 
 async def upsert_chunks(chunks: list[ChunkVector]) -> None:

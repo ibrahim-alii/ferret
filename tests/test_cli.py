@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
 from backend.cli.main import app
+from backend.ingestion.ingest import PaperRecord
 
 runner = CliRunner()
 
@@ -20,23 +21,23 @@ runner = CliRunner()
 
 class TestFerretInit:
     @patch("backend.cli.main.ensure_collection", new_callable=AsyncMock)
-    @patch("backend.cli.main.run_create_all", new_callable=AsyncMock)
+    @patch("backend.cli.main.init_db", new_callable=AsyncMock)
     def test_init_calls_schema_create_all_and_ensure_collection(
-        self, mock_create_all, mock_ensure
+        self, mock_init_db, mock_ensure
     ):
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        mock_create_all.assert_awaited_once()
+        mock_init_db.assert_awaited_once()
         mock_ensure.assert_awaited_once()
 
     @patch("backend.cli.main.ensure_collection", new_callable=AsyncMock)
-    @patch("backend.cli.main.run_create_all", new_callable=AsyncMock)
-    def test_init_is_idempotent(self, mock_create_all, mock_ensure):
+    @patch("backend.cli.main.init_db", new_callable=AsyncMock)
+    def test_init_is_idempotent(self, mock_init_db, mock_ensure):
         result1 = runner.invoke(app, ["init"])
         result2 = runner.invoke(app, ["init"])
         assert result1.exit_code == 0
         assert result2.exit_code == 0
-        assert mock_create_all.await_count == 2
+        assert mock_init_db.await_count == 2
         assert mock_ensure.await_count == 2
 
 
@@ -141,20 +142,24 @@ class TestFerretDev:
 class TestFerretIngest:
     @patch("backend.cli.main.ingest_paper", new_callable=AsyncMock)
     def test_ingest_calls_ingest_paper_with_arxiv_id(self, mock_ingest):
-        mock_ingest.return_value = {"status": "ok", "title": "Test Paper"}
+        mock_ingest.return_value = PaperRecord(
+            arxiv_id="2401.00001", title="Test Paper", abstract="", ingestion_status="full"
+        )
         result = runner.invoke(app, ["ingest", "2401.00001"])
         assert result.exit_code == 0
         mock_ingest.assert_awaited_once_with("2401.00001")
 
     @patch("backend.cli.main.ingest_paper", new_callable=AsyncMock)
     def test_ingest_prints_status_and_title(self, mock_ingest):
-        mock_ingest.return_value = {
-            "status": "ingested",
-            "title": "Attention Is All You Need",
-        }
+        mock_ingest.return_value = PaperRecord(
+            arxiv_id="1706.03762",
+            title="Attention Is All You Need",
+            abstract="",
+            ingestion_status="full",
+        )
         result = runner.invoke(app, ["ingest", "1706.03762"])
         assert result.exit_code == 0
-        assert "ingested" in result.output
+        assert "full" in result.output
         assert "Attention Is All You Need" in result.output
 
 

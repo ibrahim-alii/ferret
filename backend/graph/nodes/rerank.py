@@ -6,6 +6,9 @@ import voyageai
 
 logger = logging.getLogger(__name__)
 
+# Shared across requests so VOYAGE_MAX_CONCURRENCY bounds total in-flight Voyage calls.
+_semaphore = asyncio.Semaphore(int(os.environ.get("VOYAGE_MAX_CONCURRENCY", "2")))
+
 
 async def rerank_node(state: dict) -> dict:
     rerank_model = os.environ.get("VOYAGE_RERANK_MODEL", "rerank-2.5-lite")
@@ -17,9 +20,6 @@ async def rerank_node(state: dict) -> dict:
 
     query = state["user_message"]
     documents = [c.get("text", "") for c in chunks]
-
-    max_concurrency = int(os.environ.get("VOYAGE_MAX_CONCURRENCY", "2"))
-    _semaphore = asyncio.Semaphore(max_concurrency)
 
     client = voyageai.AsyncClient()
     async with _semaphore:

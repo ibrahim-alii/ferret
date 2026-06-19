@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.db.models import Base
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./ferret.db")
+# Single source of truth for the SQLite location (PRD Section 9). The writer here and
+# the read-only small-to-big expansion in graph/nodes/expand.py both derive from this var.
+SQLITE_DB_PATH = os.environ.get("SQLITE_DB_PATH", "./backend/data/app.db")
+DATABASE_URL = f"sqlite+aiosqlite:///{SQLITE_DB_PATH}"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 

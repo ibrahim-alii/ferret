@@ -29,7 +29,7 @@ def _run_ragas(dataset: list[dict[str, Any]]) -> dict[str, float]:
     from datasets import Dataset
 
     llm = ChatGroq(
-        model=os.environ.get("GENERATION_MODEL", "llama-3.1-8b-instant"),
+        model=os.environ.get("GENERATION_MODEL", "llama-3.3-70b-versatile"),
     )
     voyage_key = os.environ.get("VOYAGE_API_KEY")
     if not voyage_key:

@@ -53,7 +53,7 @@ async def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     """
     batch_size = int(os.environ.get("VOYAGE_BATCH_SIZE", str(_DEFAULT_BATCH_SIZE)))
     max_concurrency = int(os.environ.get("VOYAGE_MAX_CONCURRENCY", str(_DEFAULT_MAX_CONCURRENCY)))
-    model = os.environ.get("VOYAGE_MODEL", _DEFAULT_MODEL)
+    model = os.environ.get("VOYAGE_EMBED_MODEL", _DEFAULT_MODEL)
 
     api_key = os.environ.get("VOYAGE_API_KEY")
     if not api_key:

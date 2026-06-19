@@ -149,13 +149,13 @@ class TestSparseEncoder:
 class TestEnsureCollection:
     @pytest.mark.asyncio
     async def test_collection_created_with_dense_and_sparse_named_vectors(self):
-        from backend.vectorstore.store import ensure_collection
+        from backend.vectorstore.store import _ensure_collection
 
         mock_client = AsyncMock()
         mock_client.collection_exists = AsyncMock(return_value=False)
         mock_client.create_collection = AsyncMock()
 
-        await ensure_collection(mock_client)
+        await _ensure_collection(mock_client)
 
         mock_client.create_collection.assert_called_once()
         _, kwargs = mock_client.create_collection.call_args
@@ -170,13 +170,13 @@ class TestEnsureCollection:
 
     @pytest.mark.asyncio
     async def test_collection_creation_is_idempotent(self):
-        from backend.vectorstore.store import ensure_collection
+        from backend.vectorstore.store import _ensure_collection
 
         mock_client = AsyncMock()
         mock_client.collection_exists = AsyncMock(return_value=True)
         mock_client.create_collection = AsyncMock()
 
-        await ensure_collection(mock_client)
+        await _ensure_collection(mock_client)
 
         mock_client.create_collection.assert_not_called()
 
@@ -416,11 +416,9 @@ class TestHybridSearch:
 class TestIntegration:
     @pytest.mark.asyncio
     async def test_real_qdrant_create_collection_and_upsert_and_query(self):
-        from backend.vectorstore.client import get_client
         from backend.vectorstore.store import ensure_collection, upsert_chunks, hybrid_search
 
-        async with get_client() as client:
-            await ensure_collection(client)
+        await ensure_collection()
         chunks = [_make_chunk_vector(chunk_id="integ-1", text="large language models")]
         await upsert_chunks(chunks)
         results = await hybrid_search([0.1] * 1024, "language models", None, 5)
@@ -428,11 +426,9 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_real_qdrant_hybrid_search_paper_id_filter(self):
-        from backend.vectorstore.client import get_client
         from backend.vectorstore.store import ensure_collection, upsert_chunks, hybrid_search
 
-        async with get_client() as client:
-            await ensure_collection(client)
+        await ensure_collection()
         chunks = [_make_chunk_vector(chunk_id="integ-2", paper_id="paper-A", text="attention")]
         await upsert_chunks(chunks)
         results = await hybrid_search([0.1] * 1024, "attention", "paper-A", 5)
@@ -441,11 +437,9 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_real_qdrant_server_side_rrf_returns_fused_ranking(self):
-        from backend.vectorstore.client import get_client
         from backend.vectorstore.store import ensure_collection, hybrid_search
 
-        async with get_client() as client:
-            await ensure_collection(client)
+        await ensure_collection()
         results = await hybrid_search([0.1] * 1024, "transformer", None, 3)
         scores = [r.score for r in results]
         assert scores == sorted(scores, reverse=True)

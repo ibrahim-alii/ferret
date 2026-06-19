@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 async def expand_node(state: dict) -> dict:
     max_parents = int(os.environ.get("GENERATION_MAX_PARENTS", "5"))
-    db_path = os.environ.get("SQLITE_DB_PATH", "ferret.db")
+    db_path = os.environ.get("SQLITE_DB_PATH", "./backend/data/app.db")
 
     children = state["reranked_children"]
     seen_parent_ids: set[str] = set()
@@ -25,15 +25,17 @@ async def expand_node(state: dict) -> dict:
             seen_parent_ids.add(parent_id)
 
             cursor = await conn.execute(
-                "SELECT chunk_id, parent_chunk_id, paper_id, section_name, text"
-                " FROM chunks WHERE chunk_id = ?",
+                "SELECT c.id, c.parent_chunk_id, p.arxiv_id AS paper_id,"
+                " c.section_name, c.text"
+                " FROM chunks c JOIN papers p ON c.paper_id = p.id"
+                " WHERE c.id = ?",
                 (parent_id,),
             )
             row = await cursor.fetchone()
             if row is not None:
                 parent_sections.append(
                     {
-                        "section_id": row["chunk_id"],
+                        "section_id": row["id"],
                         "text": row["text"],
                         "paper_id": row["paper_id"],
                         "section_title": row["section_name"],

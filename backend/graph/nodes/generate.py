@@ -1,7 +1,7 @@
 import logging
 import os
 
-import groq
+from backend.graph.nodes._llm import get_groq_client
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ async def generate_node(state: dict) -> dict:
 
     stream_events: list[dict] = []
 
-    client = groq.AsyncGroq()
+    client = get_groq_client()
     stream = await client.chat.completions.create(
         model=generation_model,
         messages=messages,

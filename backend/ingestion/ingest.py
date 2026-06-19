@@ -69,7 +69,9 @@ async def ingest_paper(arxiv_id: str) -> PaperRecord:
             sections=filtered_sections,
         )
 
-        status = "full" if filtered_sections else "abstract_only"
+        # "full" only if we actually produced child chunks to index; otherwise the
+        # paper is usable in degraded abstract-only mode (nothing in Qdrant to retrieve).
+        status = "full" if children else "abstract_only"
 
         if existing is None:
             paper = Paper(
@@ -110,7 +112,7 @@ async def ingest_paper(arxiv_id: str) -> PaperRecord:
             chunk_vectors: list[ChunkVector] = [
                 ChunkVector(
                     chunk_id=child.id,
-                    paper_id=paper.id,
+                    paper_id=paper.arxiv_id,
                     section_name=child.section_name,
                     chunk_type=child.chunk_type,
                     dense_vector=vector,

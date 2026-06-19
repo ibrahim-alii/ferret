@@ -1,7 +1,7 @@
 import logging
 import os
 
-import groq
+from backend.graph.nodes._llm import groq_complete
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,7 @@ async def grade_node(state: dict) -> dict:
     top_chunk_text = children[0].get("text", "") if children else ""
     user_question = state.get("user_message", "")
 
-    client = groq.AsyncGroq()
-    completion = await client.chat.completions.create(
+    content = await groq_complete(
         model=grading_model,
         messages=[
             {
@@ -44,7 +43,7 @@ async def grade_node(state: dict) -> dict:
         max_tokens=200,
     )
 
-    response_text = completion.choices[0].message.content.strip().lower()
+    response_text = content.strip().lower()
     sufficient = response_text.startswith("yes")
     reasoning = response_text
 

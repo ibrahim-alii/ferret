@@ -57,7 +57,7 @@ async def test_retrieve_node_deep_dive_passes_paper_id_filter(monkeypatch):
     mock_voyage = AsyncMock()
     mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
 
-    mock_hybrid = AsyncMock(return_value=[make_chunk()])
+    mock_hybrid = AsyncMock(return_value=[])
 
     with patch("voyageai.AsyncClient", return_value=mock_voyage), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid):
@@ -80,7 +80,7 @@ async def test_retrieve_node_ask_passes_no_paper_id_filter(monkeypatch):
     mock_voyage = AsyncMock()
     mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
 
-    mock_hybrid = AsyncMock(return_value=[make_chunk()])
+    mock_hybrid = AsyncMock(return_value=[])
 
     with patch("voyageai.AsyncClient", return_value=mock_voyage), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid):
@@ -186,7 +186,7 @@ async def test_expand_node_fetches_parent_sections_for_reranked_children(monkeyp
 
     chunks = [make_chunk(chunk_id="c1", parent_chunk_id="p1", paper_id="arxiv1", score=0.9)]
 
-    mock_row = {"chunk_id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -215,7 +215,7 @@ async def test_expand_node_dedupes_shared_parents(monkeypatch):
         make_chunk(chunk_id="c2", parent_chunk_id="p1", paper_id="arxiv1", score=0.8),
     ]
 
-    mock_row = {"chunk_id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -241,13 +241,13 @@ async def test_expand_node_caps_distinct_parents(monkeypatch):
     chunks = [make_chunk(chunk_id=f"c{i}", parent_chunk_id=f"p{i}", paper_id="arxiv1", score=0.9 - i*0.05) for i in range(5)]
 
     async def fake_fetchone():
-        return {"chunk_id": "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "T"}
+        return {"id": "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "T"}
 
     call_count = 0
 
     async def fake_execute(sql, params=None):
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"chunk_id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": f"text_{call_count}"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": f"text_{call_count}"})
         return mock_cursor
 
     mock_conn = AsyncMock()
@@ -1031,7 +1031,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_hybrid = AsyncMock(return_value=[high_score_chunk])
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchone = AsyncMock(return_value={"chunk_id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
+    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock(return_value=mock_cursor)
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -1112,7 +1112,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     async def fake_execute(sql, params=None):
         execute_calls.append(sql.strip().upper())
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"chunk_id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
         return mock_cursor
 
     mock_conn = AsyncMock()

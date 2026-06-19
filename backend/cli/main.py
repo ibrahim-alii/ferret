@@ -11,11 +11,15 @@ from typing import Optional
 
 import typer
 import uvicorn
+from dotenv import load_dotenv
 
-from backend.db import run_create_all
+# Load .env before importing modules that read config at import time.
+load_dotenv()
+
+from backend.db.session import init_db
 from backend.vectorstore.store import ensure_collection
-from backend.ingestion.pipeline import ingest_paper
-from backend.graph.chain import astream_chat
+from backend.ingestion.ingest import ingest_paper
+from backend.graph.entrypoint import astream_chat
 from evals.run_all import run_all
 
 app = typer.Typer(help="Ferret — research paper chat assistant.")
@@ -33,7 +37,7 @@ class ChatMode(str, enum.Enum):
 @app.command()
 def init() -> None:
     """Create SQLite schema and ensure the Qdrant collection exists."""
-    asyncio.run(run_create_all())
+    asyncio.run(init_db())
     asyncio.run(ensure_collection())
     typer.echo("Initialized: schema and vector collection are ready.")
 
@@ -135,8 +139,8 @@ def dev() -> None:
 def ingest(arxiv_id: str = typer.Argument(..., help="arXiv paper ID")) -> None:
     """Ingest a paper from arXiv into the knowledge base."""
     result = asyncio.run(ingest_paper(arxiv_id))
-    typer.echo(f"Status: {result.get('status', 'unknown')}")
-    typer.echo(f"Title:  {result.get('title', '')}")
+    typer.echo(f"Status: {result.ingestion_status}")
+    typer.echo(f"Title:  {result.title}")
 
 
 # ---------------------------------------------------------------------------

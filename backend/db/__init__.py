@@ -1,5 +1,5 @@
-"""Shared DB layer — stub until Module 2 is integrated."""
+"""Shared DB layer (module 1/4).
 
-
-async def run_create_all() -> None:
-    """Create all SQLAlchemy tables."""
+Schema, engine, and session helpers live in ``backend.db.session``; ORM models in
+``backend.db.models``. Import from those submodules directly.
+"""

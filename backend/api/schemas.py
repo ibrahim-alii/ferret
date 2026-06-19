@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _ARXIV_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 
@@ -61,7 +61,7 @@ class PostSessionResponse(BaseModel):
 
 
 class PostMessageRequest(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=8000)
 
 
 class MessageResponse(BaseModel):
