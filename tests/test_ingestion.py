@@ -389,7 +389,7 @@ class TestEmbedder:
             mock_openai.embeddings.create = AsyncMock(return_value=mock_embed_result)
             mock_cls.return_value = mock_openai
 
-            with patch.dict("os.environ", {"OPENAI_BATCH_SIZE": "10", "OPENAI_API_KEY": "test-key"}):
+            with patch.dict("os.environ", {"OPENAI_BATCH_SIZE": "10", "OPENAI_API_KEY": "test-key", "USE_LOCAL_EMBEDDINGS": "false"}):
                 result = await embed_chunks(chunks)
 
         assert mock_openai.embeddings.create.call_count == 1

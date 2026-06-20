@@ -6,11 +6,14 @@
   <title>Ferret — Research Intelligence</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <aside id="sidebar" class="sidebar" aria-label="Chat history">
+    <button id="new-chat-btn" class="new-chat-btn" aria-label="Start a new chat">
+      <span class="new-chat-icon" aria-hidden="true">＋</span> New chat
+    </button>
     <div class="sidebar-head">
       <span class="sidebar-title">History</span>
     </div>
@@ -25,15 +28,6 @@
       </div>
       <p class="logo-sub">Research Intelligence</p>
     </header>
-
-    <nav class="mode-tabs" role="tablist" aria-label="Research mode">
-      <button id="tab-ask" role="tab" aria-selected="true" class="tab active">
-        <span class="tab-icon">◎</span> Ask
-      </button>
-      <button id="tab-deep" role="tab" aria-selected="false" class="tab">
-        <span class="tab-icon">◈</span> Deep Dive
-      </button>
-    </nav>
 
     <section id="arxiv-section" class="arxiv-section" hidden aria-label="Paper ingestion">
       <div class="arxiv-row">
@@ -52,6 +46,19 @@
     </section>
 
     <main class="chat-area" aria-label="Conversation">
+      <div id="mode-picker" class="mode-picker" aria-label="Choose a research mode">
+        <button id="pick-ask" class="mode-card">
+          <span class="mode-card-icon" aria-hidden="true">◎</span>
+          <span class="mode-card-title">Ask</span>
+          <span class="mode-card-desc">Search across the whole corpus. It grows as you add papers.</span>
+        </button>
+        <button id="pick-deep" class="mode-card">
+          <span class="mode-card-icon" aria-hidden="true">◈</span>
+          <span class="mode-card-title">Deep Dive</span>
+          <span class="mode-card-desc">Ground every answer in a single paper you choose.</span>
+        </button>
+      </div>
+
       <div
         id="chat-list"
         class="chat-list"

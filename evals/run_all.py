@@ -46,13 +46,13 @@ async def run_all(paper_id: str, mode: str | None = "ask") -> dict[str, Any]:
     from backend.graph.nodes.rerank import rerank_node
 
     runs_results: dict = {"dense": {}, "hybrid": {}, "hybrid_rerank": {}}
-    # NOTE: zero vectors are used as query embeddings to avoid Voyage API calls during eval.
+    # NOTE: zero vectors are used as query embeddings to avoid embedding API calls during eval.
     # The hybrid and hybrid+rerank runs are compared against each other relative to qrels,
     # so consistent (if meaningless) dense vectors still measure the *reranking* lift correctly.
     # The dense-only run will reflect cosine-nearest to the zero vector (arbitrary), so its
     # absolute Recall@k numbers should be interpreted as a lower-bound baseline, not a fair
     # dense-retrieval measurement. For a fair dense comparison, replace dummy_dense with real
-    # Voyage embeddings per query.
+    # query embeddings.
     eval_queries = list(qrels_dict.keys())[:5]
     embed_dim = int(os.environ.get("OPENAI_EMBED_DIM", "1536"))
     dummy_dense = [0.0] * embed_dim
@@ -81,7 +81,7 @@ async def run_all(paper_id: str, mode: str | None = "ask") -> dict[str, Any]:
             runs_results["hybrid"][query] = {str(c.chunk_id): c.score for c in hybrid_chunks}
 
             # Rerank the hybrid candidates
-            tracker.count_call("voyage")
+            tracker.count_call("rerank")
             rerank_state = {
                 "user_message": query,
                 "retrieved_chunks": [
@@ -148,7 +148,7 @@ async def run_all(paper_id: str, mode: str | None = "ask") -> dict[str, Any]:
             contexts = entry.get("contexts", [])
             if not answer or not contexts:
                 continue
-            tracker.count_call("voyage")
+            tracker.count_call("rerank")
             chunks = [{"chunk_id": f"ctx_{i}", "text": c} for i, c in enumerate(contexts)]
             result = attribute_answer(answer, chunks)
             attribution_results.append(result)

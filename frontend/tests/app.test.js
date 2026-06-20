@@ -15,6 +15,7 @@ import {
   AppState,
   consumeSSEStream,
   loadSessions,
+  createTypewriter,
 } from '../static/app.js';
 
 // ─── SSE frame parsing ────────────────────────────────────────────────────────
@@ -413,5 +414,42 @@ describe('consumeSSEStream', () => {
     const onError = vi.fn();
     await consumeSSEStream('/sessions/s1/messages', {}, { onError });
     expect(onError).toHaveBeenCalled();
+  });
+});
+
+// ─── Typewriter (gentle streaming reveal) ────────────────────────────────────
+
+describe('createTypewriter', () => {
+  it('reveals queued text gradually and resolves finish() once fully drained', async () => {
+    const el = document.createElement('div');
+    let firstCharCalls = 0;
+    const tw = createTypewriter(el, { onFirstChar: () => firstCharCalls++ });
+
+    tw.push('Hello world');
+    // Reveal is paced, so it is not all present synchronously.
+    expect(el.textContent.length).toBeLessThan('Hello world'.length);
+
+    await tw.finish();
+
+    expect(el.textContent).toBe('Hello world');
+    expect(firstCharCalls).toBe(1); // fires exactly once, on the first revealed char
+  });
+
+  it('appends text pushed after streaming has already begun', async () => {
+    const el = document.createElement('div');
+    const tw = createTypewriter(el);
+
+    tw.push('foo ');
+    tw.push('bar');
+    await tw.finish();
+
+    expect(el.textContent).toBe('foo bar');
+  });
+
+  it('finish() resolves immediately when nothing was pushed', async () => {
+    const el = document.createElement('div');
+    const tw = createTypewriter(el);
+    await tw.finish();
+    expect(el.textContent).toBe('');
   });
 });

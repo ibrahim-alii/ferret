@@ -18,6 +18,7 @@
   --mono:       'DM Mono', 'Courier New', monospace;
   --serif:      'Playfair Display', Georgia, serif;
   --sans:       'DM Sans', system-ui, sans-serif;
+  --reading:    'Newsreader', Georgia, serif;
 }
 
 html, body {
@@ -44,6 +45,33 @@ body { display: flex; }
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-bottom: 1.25rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(232, 160, 48, 0.07);
+  border: 1px solid var(--amber-dim);
+  border-radius: var(--radius);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.new-chat-btn:hover {
+  background: rgba(232, 160, 48, 0.14);
+  border-color: var(--amber);
+  transform: translateY(-1px);
+}
+
+.new-chat-icon { font-size: 1em; line-height: 1; }
 
 .sidebar-head {
   display: flex;
@@ -153,38 +181,64 @@ body { display: flex; }
   margin-top: 0.2rem;
 }
 
-/* ── Mode tabs ── */
-.mode-tabs {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: 1.25rem;
-}
-
-.tab {
+/* ── Mode picker (new-chat empty state) ── */
+.mode-picker {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 1.1rem;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem 0;
+}
+
+.mode-picker[hidden] { display: none; }
+
+/* While the picker is shown, the (empty) chat list shouldn't claim vertical space. */
+.mode-picker:not([hidden]) ~ .chat-list { display: none; }
+
+@media (max-width: 520px) { .mode-picker { flex-direction: column; } }
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex: 1;
+  max-width: 260px;
+  min-height: 170px;
+  padding: 1.4rem 1.3rem;
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.04em;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
 }
 
-.tab:hover { color: var(--text); border-color: var(--amber-dim); }
-
-.tab.active {
-  color: var(--amber);
+.mode-card:hover {
   border-color: var(--amber);
   background: rgba(232, 160, 48, 0.07);
+  transform: translateY(-2px);
 }
 
-.tab-icon { font-size: 0.9em; }
+.mode-card-icon {
+  font-size: 1.5rem;
+  color: var(--amber);
+  line-height: 1;
+}
+
+.mode-card-title {
+  font-family: var(--serif);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mode-card-desc {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
 
 /* ── arxiv section ── */
 .arxiv-section {
@@ -258,10 +312,11 @@ body { display: flex; }
 /* ── Messages ── */
 .msg {
   max-width: 82%;
-  padding: 0.65rem 0.9rem;
+  padding: 0.7rem 0.95rem;
   border-radius: var(--radius);
-  font-size: 0.9rem;
-  line-height: 1.6;
+  font-family: var(--reading);
+  font-size: 1.02rem;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -392,8 +447,8 @@ body { display: flex; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
-  font-family: var(--sans);
-  font-size: 0.9rem;
+  font-family: var(--reading);
+  font-size: 1rem;
   resize: none;
   outline: none;
   transition: border-color 0.15s;

@@ -123,9 +123,9 @@ async def ask_corrective_node(state: dict) -> dict:
         relevant_ids = {p["arxiv_id"] for p in pool}
 
     # Ingest only relevant papers up to ingest_candidates. Run sequentially: each
-    # ingestion makes batched Voyage embedding calls, and the user already sees the
-    # interim "searching..." message, so fanning these out concurrently would only
-    # risk tripping the embedding rate limit. Log failures but do not abort.
+    # ingestion makes batched embedding calls (OpenAI/Gemini), and the user already
+    # sees the interim "searching..." message, so fanning these out concurrently would
+    # only risk tripping the embedding rate limit. Log failures but do not abort.
     to_ingest = [p for p in pool if p["arxiv_id"] in relevant_ids][:ingest_candidates]
     for paper in to_ingest:
         try:

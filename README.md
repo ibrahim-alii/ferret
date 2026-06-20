@@ -26,10 +26,10 @@ Browser
        └─ FastAPI backend
             ├─ Ingestion Graph (LangGraph)
             │    └─ arXiv API → HTML/PDF parser → filter → chunk
-            │         → Voyage embed → Qdrant upsert + SQLite write
+            │         → OpenAI/Gemini embed → Qdrant upsert + SQLite write
             └─ CRAG Chat Graph (LangGraph)
                  Retrieve (hybrid RRF)
-                   → Rerank (Voyage)
+                   → Rerank (Jina)
                      → Expand small-to-big (SQLite)
                        → Grade (2-threshold + LLM judge)
                          ├─ sufficient  → Generate (Groq) → SSE stream
@@ -47,7 +47,8 @@ Browser
 | Python 3.11+ | Backend runtime |
 | Node.js 18+ | Frontend server |
 | [Groq](https://console.groq.com) API key | LLM generation + grading (free tier) |
-| [Voyage AI](https://www.voyageai.com) API key | Embeddings + reranking (free tier) |
+| [OpenAI](https://platform.openai.com) (or Gemini) API key | Dense embeddings |
+| [Jina AI](https://jina.ai/reranker) API key | Reranking (free tier) |
 | [Qdrant Cloud](https://cloud.qdrant.io) cluster | Vector store (free tier, 1 GB RAM) |
 
 ---
@@ -107,15 +108,17 @@ Copy `.env.example` to `.env`. The variables below are the ones you're most like
 | `GRADING_MODEL` | `llama-3.1-8b-instant` | Small model for grading, query gen, candidate checks |
 | `GENERATION_MODEL` | `llama-3.3-70b-versatile` | Larger model for final user-facing answers |
 
-### Voyage AI (Embeddings + Reranking)
+### Jina AI (Reranking)
 
 | Variable | Default | Description |
 |---|---|---|
-| `VOYAGE_API_KEY` | — | Required |
-| `VOYAGE_EMBED_MODEL` | `voyage-4-lite` | Dense embedding model — don't change after first ingest |
-| `VOYAGE_EMBED_DIM` | `1024` | Vector dimension |
-| `VOYAGE_RERANK_MODEL` | `rerank-2.5-lite` | Reranker |
-| `VOYAGE_MAX_CONCURRENCY` | `2` | Bounded concurrency for free-tier rate limits |
+| `JINA_API_KEY` | — | Required — free key at [jina.ai/reranker](https://jina.ai/reranker) |
+| `JINA_RERANK_MODEL` | `jina-reranker-v2-base-multilingual` | Reranker model |
+| `JINA_MAX_CONCURRENCY` | `4` | Bounded concurrency for rerank calls |
+| `JINA_RETRY_BASE_WAIT` | `2` | Backoff base (s) on transient 429/5xx; `wait = base * attempt` |
+| `JINA_TIMEOUT` | `30` | Per-request timeout (s) |
+
+Dense embeddings come from OpenAI (`OPENAI_EMBED_MODEL`) or Gemini when `USE_LOCAL_EMBEDDINGS=true` — see the embeddings vars above.
 
 ### Qdrant
 
@@ -194,7 +197,7 @@ cd frontend && npm test
 
 ### Testing strategy
 
-- **Unit**: every backend module has a corresponding `tests/test_<module>.py`. Groq, Voyage, Qdrant, and arXiv calls are patched with `pytest-mock`. Parser, chunker, filter, and grader logic are exercised with fixture inputs.
+- **Unit**: every backend module has a corresponding `tests/test_<module>.py`. Groq, Jina, Qdrant, and arXiv calls are patched with `pytest-mock`. Parser, chunker, filter, and grader logic are exercised with fixture inputs.
 - **Integration** (`@pytest.mark.integration`): hit real endpoints to verify the full ingestion and chat flow end-to-end. Skipped in CI by default.
 - **Eval** (`@pytest.mark.eval`): 5-layer RAG quality suite run against a real ingested paper. See below.
 
@@ -206,8 +209,8 @@ cd frontend && npm test
 |---|---|
 | Backend | Python 3.11, FastAPI, LangGraph, SQLAlchemy (async), aiosqlite, Typer |
 | Frontend | Node.js, Express, vanilla JS (ES6), HTML5/CSS3, Vitest |
-| Vector store | Qdrant Cloud — dense (Voyage) + sparse (BM25) named vectors, server-side RRF |
-| Embeddings | Voyage AI — `voyage-4-lite` (1024-dim dense), `rerank-2.5-lite` |
+| Vector store | Qdrant Cloud — dense + sparse (BM25) named vectors, server-side RRF |
+| Embeddings / rerank | OpenAI `text-embedding-3-small` (or Gemini) dense embeddings; Jina `jina-reranker-v2-base-multilingual` rerank |
 | LLM | Groq — `llama-3.1-8b-instant` (grading), `llama-3.3-70b-versatile` (generation) |
 | Document parsing | BeautifulSoup4 (HTML), PyMuPDF (PDF fallback) |
 | Eval | pytest, RAGAS, ranx, Datasets |

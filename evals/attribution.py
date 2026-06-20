@@ -1,31 +1,24 @@
 """Answer attribution: map answer sentences to retrieved chunks via embedding similarity."""
 from __future__ import annotations
 
-import os
+import asyncio
 import re
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-import voyageai
+
+from backend.ingestion.embedder import embed_chunks
 
 _SIMILARITY_THRESHOLD = 0.75
 
-_voyage_client: voyageai.Client | None = None
-
-
-def _get_voyage_client() -> voyageai.Client:
-    global _voyage_client
-    if _voyage_client is None:
-        api_key = os.environ.get("VOYAGE_API_KEY")
-        if not api_key:
-            raise EnvironmentError("VOYAGE_API_KEY is not set")
-        _voyage_client = voyageai.Client(api_key=api_key)
-    return _voyage_client
-
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
-    result = _get_voyage_client().embed(texts, model="voyage-3", input_type="document")
-    return result.embeddings
+    # Reuse the runtime embedder (OpenAI or Gemini, per USE_LOCAL_EMBEDDINGS) so eval
+    # similarity matches the embeddings the app actually retrieves with. embed_chunks
+    # reads `.text` off each item, so wrap the raw strings in lightweight objects.
+    docs = [SimpleNamespace(text=t) for t in texts]
+    return asyncio.run(embed_chunks(docs))
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

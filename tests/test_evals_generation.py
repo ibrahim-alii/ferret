@@ -53,16 +53,18 @@ class TestGenerationEval:
 
         assert scores["answer_relevancy"] >= 0.5
 
-    def test_ragas_uses_groq_llm_and_voyage_embeddings_not_openai(self):
-        """RAGAS configuration must not use OpenAI — only Groq + Voyage."""
+    def test_ragas_uses_project_embedder_not_vendor_classes(self):
+        """RAGAS must go through the project embedder adapter, not hardcode a vendor
+        embeddings class (Voyage or langchain OpenAI)."""
         import evals.generation as gen_module
         import inspect
 
         source = inspect.getsource(gen_module)
 
-        assert "openai" not in source.lower()
-        assert "ChatOpenAI" not in source
+        assert "VoyageAIEmbeddings" not in source
         assert "OpenAIEmbeddings" not in source
+        assert "ChatOpenAI" not in source
+        assert "_ProjectEmbeddings" in source
 
     def test_ragas_scores_serializable_to_json(self):
         """RAGAS score dict must be JSON-serializable."""

@@ -138,6 +138,48 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ─── Typewriter (gentle streaming reveal) ─────────────────────────────────────
+
+/**
+ * Reveals streamed text into `el` at a steady, readable pace instead of dumping
+ * tokens as they arrive. `push(text)` queues more text; `finish()` resolves once
+ * the queue has fully drained. `onFirstChar` fires when the first character is
+ * revealed; `onReveal` fires after each tick (e.g. to scroll). Exported for testing.
+ */
+export function createTypewriter(el, { onFirstChar, onReveal } = {}) {
+  const CHARS_PER_TICK = 2;
+  const TICK_MS = 18;
+
+  let queue = '';
+  let timer = null;
+  let started = false;
+
+  function pump() {
+    if (!queue.length) { timer = null; return; }
+    if (!started) { started = true; onFirstChar && onFirstChar(); }
+    el.textContent += queue.slice(0, CHARS_PER_TICK);
+    queue = queue.slice(CHARS_PER_TICK);
+    onReveal && onReveal();
+    timer = setTimeout(pump, TICK_MS);
+  }
+
+  return {
+    push(text) {
+      if (!text) return;
+      queue += text;
+      if (!timer) timer = setTimeout(pump, TICK_MS);
+    },
+    finish() {
+      return new Promise((resolve) => {
+        (function check() {
+          if (!queue.length && !timer) resolve();
+          else setTimeout(check, TICK_MS);
+        })();
+      });
+    },
+  };
+}
+
 // ─── Chat enable / disable ────────────────────────────────────────────────────
 
 export function enableChat(input, button) {
@@ -327,8 +369,10 @@ if (typeof document !== 'undefined' && document.getElementById('app')) {
 function initApp() {
   const state = new AppState();
 
-  const tabAsk      = document.getElementById('tab-ask');
-  const tabDeep     = document.getElementById('tab-deep');
+  const newChatBtn  = document.getElementById('new-chat-btn');
+  const modePicker  = document.getElementById('mode-picker');
+  const pickAsk     = document.getElementById('pick-ask');
+  const pickDeep    = document.getElementById('pick-deep');
   const arxivSection = document.getElementById('arxiv-section');
   const arxivInput  = document.getElementById('arxiv-input');
   const arxivBtn    = document.getElementById('arxiv-btn');
@@ -338,7 +382,18 @@ function initApp() {
   const chatBtn     = document.getElementById('chat-btn');
   const sessionList = document.getElementById('session-list');
 
-  disableChat(chatInput, chatBtn);
+  // New-chat empty state: no session yet, input locked until a mode is picked.
+  function showModePicker() {
+    state.setMode('ask');
+    state.setSession(null);
+    chatList.innerHTML = '';
+    arxivSection.hidden = true;
+    statusEl.textContent = '';
+    arxivInput.value = '';
+    disableChat(chatInput, chatBtn);
+    modePicker.hidden = false;
+    refreshSessions();
+  }
 
   // ── History sidebar ──
   async function refreshSessions() {
@@ -360,12 +415,9 @@ function initApp() {
   }
 
   async function openSession(summary) {
+    modePicker.hidden = true;
     state.setMode(summary.mode);
     const isDeep = summary.mode === 'deep_dive';
-    tabDeep.classList.toggle('active', isDeep);
-    tabAsk.classList.toggle('active', !isDeep);
-    tabDeep.setAttribute('aria-selected', String(isDeep));
-    tabAsk.setAttribute('aria-selected', String(!isDeep));
     arxivSection.hidden = !isDeep;
     statusEl.textContent = isDeep && summary.paper_id ? `Paper · ${summary.paper_id}` : '';
 
@@ -379,13 +431,12 @@ function initApp() {
     refreshSessions();
   }
 
-  refreshSessions();
+  // ── New chat + mode picker ──
+  newChatBtn.addEventListener('click', () => showModePicker());
 
-  // ── Mode toggle ──
-  tabAsk.addEventListener('click', async () => {
+  pickAsk.addEventListener('click', async () => {
     state.setMode('ask');
-    tabAsk.classList.add('active');
-    tabDeep.classList.remove('active');
+    modePicker.hidden = true;
     arxivSection.hidden = true;
     statusEl.textContent = '';
     disableChat(chatInput, chatBtn);
@@ -401,20 +452,23 @@ function initApp() {
       enableChat(chatInput, chatBtn);
       refreshSessions();
     } catch {
+      modePicker.hidden = false;
       statusEl.textContent = 'Failed to create session.';
     }
   });
 
-  tabDeep.addEventListener('click', () => {
+  pickDeep.addEventListener('click', () => {
     state.setMode('deep_dive');
-    tabDeep.classList.add('active');
-    tabAsk.classList.remove('active');
+    modePicker.hidden = true;
     arxivSection.hidden = false;
     disableChat(chatInput, chatBtn);
     chatList.innerHTML = '';
     state.setSession(null);
     statusEl.textContent = '';
+    arxivInput.focus();
   });
+
+  showModePicker();
 
   // ── arxiv submission ──
   arxivBtn.addEventListener('click', () => startArxivSubmit());
@@ -506,16 +560,23 @@ function initApp() {
       if (!collapsed) { thinking.collapse(); collapsed = true; }
     };
 
+    let errored = false;
+    const typewriter = createTypewriter(assistantEl, {
+      onFirstChar: collapseOnce,
+      onReveal: scrollBottom,
+    });
+
     await consumeSSEStream(
       `${BACKEND}/sessions/${state.sessionId}/messages`,
       { content: text },
       {
         onStatus:  (t) => { thinking.setStep(t); scrollBottom(); },
-        onToken:   (t) => { collapseOnce(); assistantEl.textContent += t; scrollBottom(); },
+        onToken:   (t) => { typewriter.push(t); },
         onInterim: (t) => { thinking.setStep(t); scrollBottom(); },
         onCitation:(c) => { collapseOnce(); citationContainer.appendChild(buildCitationEl(c)); scrollBottom(); },
-        onDone:    ()  => { collapseOnce(); enableChat(chatInput, chatBtn); refreshSessions(); },
+        onDone:    ()  => {},
         onError:   ()  => {
+          errored = true;
           thinking.el.remove();
           assistantEl.textContent = '[Error — please try again]';
           assistantEl.classList.add('msg-error');
@@ -523,6 +584,13 @@ function initApp() {
         },
       }
     );
+
+    if (!errored) {
+      await typewriter.finish();
+      collapseOnce();
+      enableChat(chatInput, chatBtn);
+      refreshSessions();
+    }
   }
 
   function scrollBottom() {

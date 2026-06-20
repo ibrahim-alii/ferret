@@ -97,7 +97,7 @@ class TestAttribution:
 
         assert result["chunk_utilization_rate"] == pytest.approx(2 / 3, abs=0.01)
 
-    def test_attribution_embeds_sentences_via_voyage(self):
+    def test_attribution_embeds_sentences_batched(self):
         """attribute_answer must call _embed_texts with sentences + chunks batched."""
         from evals.attribution import attribute_answer
 

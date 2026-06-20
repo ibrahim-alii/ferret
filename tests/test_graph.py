@@ -105,51 +105,109 @@ async def test_retrieve_node_calls_hybrid_search_with_query_dense_and_text(monke
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_rerank_node_calls_voyage_rerank_with_top_n_candidates(monkeypatch):
-    monkeypatch.setenv("VOYAGE_RERANK_MODEL", "rerank-2.5-lite")
+async def test_rerank_node_calls_jina_rerank_with_top_n_candidates(monkeypatch):
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
 
-    mock_result = MagicMock()
-    mock_result.results = [MagicMock(index=0, relevance_score=0.9)]
-    mock_voyage = AsyncMock()
-    mock_voyage.rerank = AsyncMock(return_value=mock_result)
+    mock_rerank = AsyncMock(return_value={"results": [{"index": 0, "relevance_score": 0.9}]})
 
     chunks = [make_chunk(chunk_id=f"c{i}") for i in range(30)]
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage):
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank):
         from backend.graph.nodes.rerank import rerank_node
-        state = make_state(retrieved_chunks=chunks)
-        await rerank_node(state)
+        await rerank_node(make_state(retrieved_chunks=chunks))
 
-    assert mock_voyage.rerank.called
-    call_kwargs = mock_voyage.rerank.call_args
-    documents_passed = call_kwargs.kwargs.get("documents", None) or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    assert documents_passed is not None
-    assert len(documents_passed) == 30  # RERANK_CANDIDATE_COUNT
+    assert mock_rerank.called
+    payload = mock_rerank.call_args.args[0]
+    assert len(payload["documents"]) == 30  # RERANK_CANDIDATE_COUNT
+    assert payload["model"]                 # a model identifier is set
+    assert payload["top_n"] == 5
 
 
 @pytest.mark.asyncio
 async def test_rerank_node_returns_top_k(monkeypatch):
-    monkeypatch.setenv("VOYAGE_RERANK_MODEL", "rerank-2.5-lite")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
 
-    # Build 10 mock results sorted by score descending
-    mock_results = [MagicMock(index=i, relevance_score=1.0 - i * 0.05) for i in range(10)]
-    mock_result = MagicMock()
-    mock_result.results = mock_results
-    mock_voyage = AsyncMock()
-    mock_voyage.rerank = AsyncMock(return_value=mock_result)
+    # 10 Jina results sorted by score descending
+    results = [{"index": i, "relevance_score": 1.0 - i * 0.05} for i in range(10)]
+    mock_rerank = AsyncMock(return_value={"results": results})
 
     chunks = [make_chunk(chunk_id=f"c{i}", text=f"text {i}") for i in range(10)]
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage):
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank):
         from backend.graph.nodes.rerank import rerank_node
-        state = make_state(retrieved_chunks=chunks)
-        result = await rerank_node(state)
+        result = await rerank_node(make_state(retrieved_chunks=chunks))
 
     assert len(result["reranked_children"]) == 5  # RERANK_TOP_K
+
+
+@pytest.mark.asyncio
+async def test_rerank_node_drops_empty_text_chunks_before_jina(monkeypatch):
+    """Jina rejects empty strings; chunks with no text (e.g. a Qdrant hit with no
+    SQLite row) must be filtered out so a conversational query never aborts."""
+    monkeypatch.setenv("RERANK_TOP_K", "5")
+
+    mock_rerank = AsyncMock(return_value={"results": [{"index": 0, "relevance_score": 0.9}]})
+
+    # Mix of empty / whitespace-only / real text.
+    chunks = [
+        make_chunk(chunk_id="c0", text=""),
+        make_chunk(chunk_id="c1", text="   "),
+        make_chunk(chunk_id="c2", text="real content"),
+    ]
+
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank):
+        from backend.graph.nodes.rerank import rerank_node
+        result = await rerank_node(make_state(retrieved_chunks=chunks))
+
+    payload = mock_rerank.call_args.args[0]
+    assert payload["documents"] == ["real content"]  # no empty strings reach Jina
+    assert len(result["reranked_children"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_rerank_node_returns_empty_when_all_text_blank(monkeypatch):
+    """If every retrieved chunk has empty text, skip Jina entirely (empty list is invalid)."""
+    mock_rerank = AsyncMock()
+
+    chunks = [make_chunk(chunk_id=f"c{i}", text="") for i in range(5)]
+
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank):
+        from backend.graph.nodes.rerank import rerank_node
+        result = await rerank_node(make_state(retrieved_chunks=chunks))
+
+    assert result == {"reranked_children": []}
+    mock_rerank.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rerank_with_retry_retries_transient_then_succeeds(monkeypatch):
+    """A transient network error is retried; a subsequent 200 returns the parsed body."""
+    monkeypatch.setenv("JINA_RETRY_BASE_WAIT", "0")  # don't actually sleep
+    import httpx
+    from backend.graph.nodes import rerank as rr
+
+    ok = MagicMock()
+    ok.raise_for_status = MagicMock()
+    ok.json = MagicMock(return_value={"results": []})
+    post = AsyncMock(side_effect=[httpx.ConnectError("boom"), ok])
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+        async def __aenter__(self):
+            client = MagicMock()
+            client.post = post
+            return client
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+
+    out = await rr._rerank_with_retry({"documents": ["x"]}, {})
+    assert out == {"results": []}
+    assert post.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -962,17 +1020,14 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
     monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
     monkeypatch.setenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
-    monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
+    monkeypatch.setenv("JINA_MAX_CONCURRENCY", "4")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
     monkeypatch.setenv("GENERATION_MAX_PARENTS", "5")
     monkeypatch.setenv("SQLITE_DB_PATH", "test.db")
 
-    # Voyage rerank mock (query embedding is mocked via embed_query in the patch below)
-    mock_voyage = AsyncMock()
-    rerank_result = MagicMock()
-    rerank_result.results = [MagicMock(index=0, relevance_score=0.9)]
-    mock_voyage.rerank = AsyncMock(return_value=rerank_result)
+    # Jina rerank mock (query embedding is mocked via embed_query in the patch below)
+    mock_rerank = AsyncMock(return_value={"results": [{"index": 0, "relevance_score": 0.9}]})
 
     # Setup groq mock for generate
     tokens = ["Hello", " world"]
@@ -1019,7 +1074,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_conn.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank), \
          patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2])), \
          patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid), \
@@ -1042,16 +1097,13 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
     monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
     monkeypatch.setenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
-    monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
+    monkeypatch.setenv("JINA_MAX_CONCURRENCY", "4")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
     monkeypatch.setenv("GENERATION_MAX_PARENTS", "5")
     monkeypatch.setenv("SQLITE_DB_PATH", "test.db")
 
-    mock_voyage = AsyncMock()
-    rerank_result = MagicMock()
-    rerank_result.results = [MagicMock(index=0, relevance_score=0.9)]
-    mock_voyage.rerank = AsyncMock(return_value=rerank_result)
+    mock_rerank = AsyncMock(return_value={"results": [{"index": 0, "relevance_score": 0.9}]})
 
     tokens = ["response"]
 
@@ -1099,7 +1151,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_conn.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+    with patch("backend.graph.nodes.rerank._rerank_with_retry", mock_rerank), \
          patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2])), \
          patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid), \

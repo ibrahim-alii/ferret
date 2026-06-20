@@ -31,14 +31,14 @@ class TestLatencyTracker:
         report = tracker.report()
         assert report["calls"]["groq"] == 2
 
-    def test_api_call_counter_increments_on_voyage_embed_call(self):
+    def test_api_call_counter_increments_on_rerank_call(self):
         from evals.latency import LatencyTracker
 
         tracker = LatencyTracker()
-        tracker.count_call("voyage")
+        tracker.count_call("rerank")
 
         report = tracker.report()
-        assert report["calls"]["voyage"] == 1
+        assert report["calls"]["rerank"] == 1
 
     def test_api_call_counter_increments_on_qdrant_query(self):
         from evals.latency import LatencyTracker
@@ -80,7 +80,7 @@ class TestLatencyTracker:
         tracker = LatencyTracker()
         async with tracker.track_stage("embed"):
             await asyncio.sleep(0.001)
-        tracker.count_call("voyage")
+        tracker.count_call("rerank")
 
         report = tracker.report()
         serialized = json.dumps(report)
