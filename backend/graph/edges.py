@@ -1,6 +1,10 @@
 import os
 
 
+def route_after_classify(state: dict) -> str:
+    return "chat" if state.get("intent") == "chat" else "retrieve"
+
+
 def route_after_grade(state: dict) -> str:
     mode = state["mode"]
     grade_result = state.get("grade_result", {}) or {}

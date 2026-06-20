@@ -151,6 +151,42 @@ body { display: flex; }
   padding: 2rem 0 1rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 1.25rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* Persistent mode indicator (top-right): reminds the user which mode the
+   current chat is in. Mirrors the chosen mode card. */
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  background: rgba(232, 160, 48, 0.08);
+  border: 1px solid var(--amber-dim);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.mode-badge[hidden] { display: none; }
+
+.mode-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(232, 160, 48, 0.6);
+}
+
+.mode-badge-label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
 }
 
 .logo {

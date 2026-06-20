@@ -53,30 +53,42 @@ async def ask_corrective_node(state: dict) -> dict:
     emit({"type": "status", "step": "searching_arxiv", "content": "Searching arXiv for new papers"})
     emit({"type": "interim_message", "content": "Searching for additional sources..."})
 
-    # Generate diverse queries
-    content = await groq_complete(
-        model=grading_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    f"Generate exactly {query_count} diverse arxiv search queries to find papers"
-                    " that answer the user's question."
-                    " Return one query per line, no numbering or bullets."
-                ),
-            },
-            {"role": "user", "content": user_message},
-        ],
-        max_tokens=200,
-    )
-    raw_queries = content.strip().splitlines()
-    queries = [q.strip() for q in raw_queries if q.strip()][:query_count]
+    # Generate diverse queries. If the LLM is unavailable, fall back to a plain
+    # keyword query from the user's message so the corrective branch still runs.
+    try:
+        content = await groq_complete(
+            model=grading_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"Generate exactly {query_count} diverse arxiv search queries to find papers"
+                        " that answer the user's question."
+                        " Return one query per line, no numbering or bullets."
+                    ),
+                },
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=80,
+        )
+        raw_queries = content.strip().splitlines()
+        queries = [q.strip() for q in raw_queries if q.strip()][:query_count]
+    except Exception as exc:
+        logger.warning("arxiv query generation failed (%s); falling back to raw message", exc)
+        queries = []
+    if not queries:
+        queries = [user_message[:200]]
 
-    # Search concurrently
+    # Search concurrently. return_exceptions so one failed query doesn't abort the rest.
     all_papers: list[dict] = []
     async with httpx.AsyncClient() as http:
-        results = await asyncio.gather(*[_search_arxiv(http, q) for q in queries])
+        results = await asyncio.gather(
+            *[_search_arxiv(http, q) for q in queries], return_exceptions=True
+        )
     for result in results:
+        if isinstance(result, Exception):
+            logger.warning("arxiv search failed for a query: %s", result)
+            continue
         all_papers.extend(result)
 
     # Deduplicate by arxiv_id
@@ -113,25 +125,34 @@ async def ask_corrective_node(state: dict) -> dict:
                         "content": f"Question: {user_message}\n\nPapers:\n{candidates_text}",
                     },
                 ],
-                max_tokens=200,
+                max_tokens=60,
             )
         ).strip()
         relevant_ids = {rid.strip() for rid in raw_ids.split(",") if rid.strip()}
 
-    # If relevance check returned nothing useful, fall back to the pool
-    if not relevant_ids:
-        relevant_ids = {p["arxiv_id"] for p in pool}
+    # If the relevance check returned nothing parseable, fall back to just the single
+    # top-ranked candidate rather than ingesting the whole unfiltered pool — that would
+    # bloat the generation context (worsening 413s) with likely-irrelevant papers.
+    if not relevant_ids and pool:
+        relevant_ids = {pool[0]["arxiv_id"]}
 
-    # Ingest only relevant papers up to ingest_candidates. Run sequentially: each
-    # ingestion makes batched embedding calls (OpenAI/Gemini), and the user already
-    # sees the interim "searching..." message, so fanning these out concurrently would
-    # only risk tripping the embedding rate limit. Log failures but do not abort.
+    # Ingest relevant papers concurrently (bounded). Each ingestion is dominated by
+    # network I/O (arxiv fetch + Qdrant upsert); the embedding calls inside share a
+    # module-level semaphore in embedder.py, so fanning out a couple of ingestions at
+    # once is safe and turns 30-90s of sequential work into roughly one paper's time.
+    # ASK_INGEST_CONCURRENCY caps how many run at once. Log failures but do not abort.
     to_ingest = [p for p in pool if p["arxiv_id"] in relevant_ids][:ingest_candidates]
-    for paper in to_ingest:
-        try:
-            await run_ingestion(paper["arxiv_id"])
-        except Exception as exc:
-            logger.warning("Failed to ingest paper %r: %s", paper["arxiv_id"], exc)
+    ingest_concurrency = int(os.environ.get("ASK_INGEST_CONCURRENCY", "2"))
+    ingest_sem = asyncio.Semaphore(ingest_concurrency)
+
+    async def _safe_ingest(arxiv_id: str) -> None:
+        async with ingest_sem:
+            try:
+                await run_ingestion(arxiv_id)
+            except Exception as exc:
+                logger.warning("Failed to ingest paper %r: %s", arxiv_id, exc)
+
+    await asyncio.gather(*[_safe_ingest(p["arxiv_id"]) for p in to_ingest])
 
     new_retry_count = retry_count + 1
 

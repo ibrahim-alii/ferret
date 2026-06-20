@@ -11,6 +11,7 @@ is therefore safe.
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,19 +29,51 @@ from backend.api.schemas import (
 from backend.db.models import CitedPaper, Message, Paper, Session
 from backend.db.session import get_session
 from backend.graph.entrypoint import astream_chat
+from backend.graph.nodes._llm import groq_complete
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
 
 
 def _session_title(first_user_message: str | None, session: Session) -> str:
-    """Derive a sidebar label: first user message snippet, else mode/paper fallback."""
+    """Derive a sidebar label: stored AI title, else first-message snippet, else mode/paper."""
+    if session.title:
+        return session.title
     if first_user_message:
         snippet = first_user_message.strip().replace("\n", " ")
         return snippet[:60] + ("…" if len(snippet) > 60 else "")
     if session.mode == "deep_dive" and session.paper_id:
         return f"Deep Dive · {session.paper_id}"
     return "New chat"
+
+
+async def _generate_session_title(user_message: str, assistant_answer: str) -> str | None:
+    """Ask the cheap grading model for a short ChatGPT-style title. None on failure."""
+    model = os.environ.get("GRADING_MODEL", "llama-3.1-8b-instant")
+    try:
+        raw = await groq_complete(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate a concise 3-6 word title summarizing this conversation. "
+                        "Return only the title text — no quotes, no punctuation at the end, "
+                        "no prefixes like 'Title:'."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"User: {user_message[:500]}\n\nAssistant: {assistant_answer[:500]}",
+                },
+            ],
+            max_tokens=20,
+        )
+    except Exception as exc:
+        logger.warning("Session title generation failed: %s", exc)
+        return None
+    title = raw.strip().strip('"').strip()
+    return title[:80] or None
 
 
 @router.get("", response_model=list[SessionSummary])
@@ -213,6 +246,15 @@ async def _stream(
                             abstract_snippet=citation["abstract_snippet"],
                         )
                     )
+
+                # First turn (no prior history) and no title yet → generate a short
+                # AI summary title for the history sidebar. Best-effort: a failure
+                # here must not break the answer the user already received.
+                if not chat_history and not session.title:
+                    title = await _generate_session_title(user_content, final_content)
+                    if title:
+                        session.title = title
+                        db.add(session)
 
                 await db.commit()
 

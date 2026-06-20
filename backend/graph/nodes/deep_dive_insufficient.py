@@ -36,16 +36,21 @@ async def deep_dive_insufficient_node(state: dict) -> dict:
         )
     ).strip()
 
-    # Search arxiv
+    # Search arxiv. A failure here shouldn't error the whole turn — we can still tell
+    # the user we lack grounding, just without paper suggestions.
     citations: list[dict] = []
-
-    async with httpx.AsyncClient() as http:
-        response = await http.get(
-            ARXIV_API_URL,
-            params={"search_query": f"all:{query}", "max_results": 5},
-        )
-        response.raise_for_status()
-        xml_text = response.text
+    xml_text = ""
+    timeout = float(os.environ.get("ARXIV_TIMEOUT", "30"))
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as http:
+            response = await http.get(
+                ARXIV_API_URL,
+                params={"search_query": f"all:{query}", "max_results": 5},
+            )
+            response.raise_for_status()
+            xml_text = response.text
+    except httpx.HTTPError as exc:
+        logger.warning("arxiv search failed in deep-dive fallback: %s", exc)
 
     # Parse arxiv XML
     try:

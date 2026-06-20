@@ -36,11 +36,3 @@ async def close_db() -> None:
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with async_session() as session:
         yield session
-
-
-def session_context():
-    """Return an async context manager yielding a fresh AsyncSession.
-
-    Use outside the FastAPI dependency lifecycle (background tasks, SSE generators).
-    """
-    return async_session()

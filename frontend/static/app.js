@@ -131,6 +131,7 @@ export function buildSessionEl({ session_id, mode, title }, onSelect) {
 }
 
 function escHtml(str) {
+  if (str == null) return '';
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -274,6 +275,10 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
       }
     }
   }
+
+  // Stream closed without a terminal done/error frame (e.g. backend crashed
+  // mid-answer). Surface it so a truncated reply isn't shown as if it were final.
+  onError && onError(new Error('Response was cut short. Please try again.'));
 }
 
 // ─── Backend API helpers ──────────────────────────────────────────────────────
@@ -354,12 +359,6 @@ async function apiPost(path, body) {
   return res.json();
 }
 
-async function apiGet(path) {
-  const res = await fetch(`${BACKEND}${path}`);
-  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
-  return res.json();
-}
-
 // ─── DOM wiring (browser only) ────────────────────────────────────────────────
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {
@@ -381,6 +380,22 @@ function initApp() {
   const chatInput   = document.getElementById('chat-input');
   const chatBtn     = document.getElementById('chat-btn');
   const sessionList = document.getElementById('session-list');
+  const modeBadge      = document.getElementById('mode-badge');
+  const modeBadgeLabel = document.getElementById('mode-badge-label');
+
+  const MODE_LABELS = { ask: 'Ask', deep_dive: 'Deep Dive' };
+
+  // Persistent top-right indicator of the active chat's mode. Pass null to hide
+  // it (e.g. the new-chat picker, where no mode is chosen yet).
+  function setModeBadge(mode) {
+    if (!modeBadge) return;
+    if (!mode) {
+      modeBadge.hidden = true;
+      return;
+    }
+    modeBadgeLabel.textContent = MODE_LABELS[mode] || mode;
+    modeBadge.hidden = false;
+  }
 
   // New-chat empty state: no session yet, input locked until a mode is picked.
   function showModePicker() {
@@ -392,6 +407,7 @@ function initApp() {
     arxivInput.value = '';
     disableChat(chatInput, chatBtn);
     modePicker.hidden = false;
+    setModeBadge(null);
     refreshSessions();
   }
 
@@ -417,6 +433,7 @@ function initApp() {
   async function openSession(summary) {
     modePicker.hidden = true;
     state.setMode(summary.mode);
+    setModeBadge(summary.mode);
     const isDeep = summary.mode === 'deep_dive';
     arxivSection.hidden = !isDeep;
     statusEl.textContent = isDeep && summary.paper_id ? `Paper · ${summary.paper_id}` : '';
@@ -436,6 +453,7 @@ function initApp() {
 
   pickAsk.addEventListener('click', async () => {
     state.setMode('ask');
+    setModeBadge('ask');
     modePicker.hidden = true;
     arxivSection.hidden = true;
     statusEl.textContent = '';
@@ -453,12 +471,14 @@ function initApp() {
       refreshSessions();
     } catch {
       modePicker.hidden = false;
+      setModeBadge(null);
       statusEl.textContent = 'Failed to create session.';
     }
   });
 
   pickDeep.addEventListener('click', () => {
     state.setMode('deep_dive');
+    setModeBadge('deep_dive');
     modePicker.hidden = true;
     arxivSection.hidden = false;
     disableChat(chatInput, chatBtn);
@@ -496,9 +516,11 @@ function initApp() {
 
   function pollIngestion(arxivId) {
     if (state.pollingTimer) clearInterval(state.pollingTimer);
+    let consecutiveErrors = 0;
     state.pollingTimer = setInterval(async () => {
       try {
         const paper = await checkIngestionStatus(arxivId);
+        consecutiveErrors = 0;
         state.setIngestionStatus(paper.ingestion_status);
 
         if (paper.ready) {
@@ -524,7 +546,14 @@ function initApp() {
           statusEl.textContent = `Ingesting… (${paper.ingestion_status})`;
         }
       } catch {
-        // keep polling on transient errors
+        // Tolerate transient blips, but give up after several in a row so the user
+        // isn't stuck on "Ingesting…" forever if the backend went down.
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= 5) {
+          clearInterval(state.pollingTimer);
+          statusEl.textContent = 'Status check failed. Please refresh and try again.';
+          arxivBtn.disabled = false;
+        }
       }
     }, 2000);
   }

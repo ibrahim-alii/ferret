@@ -22,11 +22,17 @@
 
   <div id="app">
     <header class="app-header">
-      <div class="logo">
-        <span class="logo-mark">⬡</span>
-        <span class="logo-text">Ferret</span>
+      <div class="brand">
+        <div class="logo">
+          <span class="logo-mark">⬡</span>
+          <span class="logo-text">Ferret</span>
+        </div>
+        <p class="logo-sub">Research Intelligence</p>
       </div>
-      <p class="logo-sub">Research Intelligence</p>
+      <div id="mode-badge" class="mode-badge" hidden aria-live="polite">
+        <span class="mode-badge-dot" aria-hidden="true"></span>
+        <span id="mode-badge-label" class="mode-badge-label"></span>
+      </div>
     </header>
 
     <section id="arxiv-section" class="arxiv-section" hidden aria-label="Paper ingestion">

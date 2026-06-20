@@ -221,7 +221,7 @@ async def test_expand_node_fetches_parent_sections_for_reranked_children(monkeyp
 
     chunks = [make_chunk(chunk_id="c1", parent_chunk_id="p1", paper_id="arxiv1", score=0.9)]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -250,7 +250,7 @@ async def test_expand_node_dedupes_shared_parents(monkeypatch):
         make_chunk(chunk_id="c2", parent_chunk_id="p1", paper_id="arxiv1", score=0.8),
     ]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -276,13 +276,13 @@ async def test_expand_node_caps_distinct_parents(monkeypatch):
     chunks = [make_chunk(chunk_id=f"c{i}", parent_chunk_id=f"p{i}", paper_id="arxiv1", score=0.9 - i*0.05) for i in range(5)]
 
     async def fake_fetchone():
-        return {"id": "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "T"}
+        return {"id": "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": "T"}
 
     call_count = 0
 
     async def fake_execute(sql, params=None):
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": f"text_{call_count}"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": f"text_{call_count}"})
         return mock_cursor
 
     mock_conn = AsyncMock()
@@ -917,6 +917,150 @@ async def test_generate_node_uses_generation_model_not_grading_model(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_classify_node_greeting_is_chat_without_llm_call(monkeypatch):
+    # Obvious greetings short-circuit to chat with no Groq call at all.
+    import backend.graph.nodes.classify as classify_mod
+
+    called = False
+
+    async def _fail(*a, **k):
+        nonlocal called
+        called = True
+        raise AssertionError("should not call the LLM for a greeting")
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _fail)
+    result = await classify_mod.classify_node({"user_message": "hi there!"})
+    assert result == {"intent": "chat"}
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_classify_node_research_question_uses_llm(monkeypatch):
+    import backend.graph.nodes.classify as classify_mod
+
+    async def _research(*a, **k):
+        return "RESEARCH"
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _research)
+    result = await classify_mod.classify_node(
+        {"user_message": "What is sliding window attention in transformers?"}
+    )
+    assert result == {"intent": "research"}
+
+
+def test_route_after_classify_sends_chat_intent_to_chat_node():
+    from backend.graph.edges import route_after_classify
+
+    assert route_after_classify({"intent": "chat"}) == "chat"
+    assert route_after_classify({"intent": "research"}) == "retrieve"
+    assert route_after_classify({}) == "retrieve"  # default: full research path
+
+
+def _one_chunk_stream():
+    chunk = MagicMock()
+    chunk.choices = [MagicMock()]
+    chunk.choices[0].delta = MagicMock()
+    chunk.choices[0].delta.content = "ok"
+
+    class FakeStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not hasattr(self, "_done"):
+                self._done = True
+                return chunk
+            raise StopAsyncIteration
+
+    return FakeStream()
+
+
+@pytest.mark.asyncio
+async def test_generate_node_trims_context_to_token_budget(monkeypatch):
+    monkeypatch.setenv("GENERATION_MODEL", "llama-3.3-70b-versatile")
+    monkeypatch.setenv("GENERATION_MAX_CONTEXT_TOKENS", "50")
+
+    sent = {}
+
+    async def fake_create(**kwargs):
+        sent["messages"] = kwargs["messages"]
+        return _one_chunk_stream()
+
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(side_effect=fake_create)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    mock_groq_instance = MagicMock()
+    mock_groq_instance.chat = mock_chat
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance):
+        from backend.graph.nodes.generate import generate_node
+
+        big = "lorem ipsum dolor sit amet " * 1000
+        state = make_state(
+            parent_sections=[
+                {"section_id": "p1", "text": big, "paper_id": "a1", "section_title": "S"}
+            ]
+        )
+        await generate_node(state)
+
+    import tiktoken
+
+    enc = tiktoken.get_encoding("cl100k_base")
+    system_content = next(
+        m["content"] for m in sent["messages"] if m["role"] == "system"
+    )
+    # Boilerplate prompt + a context capped near the 50-token budget — nowhere near
+    # the thousands of tokens the raw section would have contributed.
+    assert len(enc.encode(system_content)) < 250
+
+
+@pytest.mark.asyncio
+async def test_generate_node_retries_with_smaller_context_on_groq_413(monkeypatch):
+    monkeypatch.setenv("GENERATION_MODEL", "llama-3.3-70b-versatile")
+
+    import httpx
+    import groq
+
+    calls: list[dict] = []
+
+    def _make_413() -> groq.APIStatusError:
+        request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+        response = httpx.Response(413, request=request)
+        return groq.APIStatusError("Request too large", response=response, body=None)
+
+    async def fake_create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise _make_413()
+        return _one_chunk_stream()
+
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(side_effect=fake_create)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    mock_groq_instance = MagicMock()
+    mock_groq_instance.chat = mock_chat
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance):
+        from backend.graph.nodes.generate import generate_node
+
+        big = "word " * 5000
+        state = make_state(
+            parent_sections=[{"section_id": "p1", "text": big, "paper_id": "a1"}]
+        )
+        await generate_node(state)
+
+    assert len(calls) == 2  # 413 on the first attempt triggers one retry
+
+    def _system_len(kwargs: dict) -> int:
+        return len(next(m["content"] for m in kwargs["messages"] if m["role"] == "system"))
+
+    # The retry rebuilds the prompt with a halved context budget, so it is smaller.
+    assert _system_len(calls[1]) < _system_len(calls[0])
+
+
+@pytest.mark.asyncio
 async def test_generate_node_includes_passed_in_chat_history_in_prompt(monkeypatch):
     monkeypatch.setenv("GENERATION_MODEL", "llama-3.3-70b-versatile")
 
@@ -1068,7 +1212,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_hybrid = AsyncMock(return_value=[high_score_chunk])
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
+    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": "context"})
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock(return_value=mock_cursor)
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -1143,7 +1287,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     async def fake_execute(sql, params=None):
         execute_calls.append(sql.strip().upper())
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "section_name": "S", "text": "context"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": "context"})
         return mock_cursor
 
     mock_conn = AsyncMock()

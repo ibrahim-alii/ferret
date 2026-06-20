@@ -57,7 +57,9 @@ async def retrieve_node(state: dict) -> dict:
     emit({"type": "status", "step": "retrieving", "content": "Searching papers"})
     limit = int(os.environ.get("RERANK_CANDIDATE_COUNT", "30"))
 
-    query_dense = await embed_query(state["user_message"])
+    # The query embedding is invariant across corrective-loop iterations (only the
+    # Qdrant corpus changes), so reuse a cached vector to skip a redundant OpenAI call.
+    query_dense = state.get("query_vector") or await embed_query(state["user_message"])
 
     paper_id = state["paper_id"] if state["mode"] == "deep_dive" else None
 
@@ -68,4 +70,7 @@ async def retrieve_node(state: dict) -> dict:
         limit=limit,
     )
 
-    return {"retrieved_chunks": await _enrich_with_text(chunks)}
+    updates: dict = {"retrieved_chunks": await _enrich_with_text(chunks)}
+    if not state.get("query_vector"):
+        updates["query_vector"] = query_dense
+    return updates

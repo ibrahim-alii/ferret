@@ -95,10 +95,12 @@ async def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     Returns vectors in the same order as input chunks.
     """
     batch_size = int(os.environ.get("OPENAI_BATCH_SIZE", str(_DEFAULT_BATCH_SIZE)))
-    max_concurrency = int(os.environ.get("OPENAI_MAX_CONCURRENCY", str(_DEFAULT_MAX_CONCURRENCY)))
 
     client = _make_client()
-    semaphore = asyncio.Semaphore(max_concurrency)
+    # Shared at module level so concurrent ingestions (e.g. Ask's corrective branch
+    # ingesting several papers at once) stay within one provider-wide concurrency
+    # budget rather than each spawning its own full quota of in-flight calls.
+    semaphore = _doc_semaphore
 
     batches = [
         [c.text for c in chunks[i : i + batch_size]]
@@ -115,7 +117,10 @@ async def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
 
 
 # Shared across requests so the active provider's concurrency limit bounds total in-flight
-# query embedding calls, rather than allowing one full quota per concurrent request.
+# embedding calls, rather than allowing one full quota per concurrent request.
+_doc_semaphore = asyncio.Semaphore(
+    int(os.environ.get("OPENAI_MAX_CONCURRENCY", str(_DEFAULT_MAX_CONCURRENCY)))
+)
 _query_semaphore = asyncio.Semaphore(
     int(os.environ.get("OPENAI_MAX_CONCURRENCY", str(_DEFAULT_MAX_CONCURRENCY)))
 )

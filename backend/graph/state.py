@@ -8,6 +8,8 @@ class GraphState(TypedDict):
     paper_id: str | None
     user_message: str
     chat_history: list[dict[str, Any]]
+    intent: Literal["chat", "research"] | None
+    query_vector: list[float] | None
     retrieved_chunks: list[dict[str, Any]]
     reranked_children: list[dict[str, Any]]
     parent_sections: list[dict[str, Any]]

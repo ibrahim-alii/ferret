@@ -42,6 +42,20 @@ async def session_factory(engine):
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
+@pytest.fixture(autouse=True)
+def _mock_title_gen():
+    """Keep unit tests offline: stub the Groq-backed session-title generator.
+
+    Defaults to None (so the sidebar falls back to the first-message snippet);
+    tests that exercise AI titles override the return value.
+    """
+    with patch(
+        "backend.api.routers.sessions._generate_session_title",
+        new=AsyncMock(return_value=None),
+    ) as m:
+        yield m
+
+
 @pytest_asyncio.fixture()
 async def client(session_factory):
     """AsyncClient wired to a fresh in-memory DB for each test."""
@@ -185,7 +199,8 @@ async def test_get_sessions_empty_when_none(client):
 
 
 @pytest.mark.asyncio
-async def test_get_sessions_lists_recent_with_title_from_first_message(client):
+async def test_get_sessions_falls_back_to_first_message_snippet_when_no_ai_title(client):
+    # _mock_title_gen returns None by default → sidebar uses the first-message snippet.
     resp = await client.post("/sessions", json={"mode": "ask"})
     sid = resp.json()["session_id"]
 
@@ -206,6 +221,29 @@ async def test_get_sessions_lists_recent_with_title_from_first_message(client):
     assert sessions[0]["session_id"] == sid
     assert sessions[0]["mode"] == "ask"
     assert sessions[0]["title"] == "What is ML?"
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_uses_ai_generated_title_on_first_turn(client, _mock_title_gen):
+    _mock_title_gen.return_value = "Machine Learning Basics"
+
+    resp = await client.post("/sessions", json={"mode": "ask"})
+    sid = resp.json()["session_id"]
+
+    with patch(
+        "backend.api.routers.sessions.astream_chat",
+        side_effect=_fake_astream_chat,
+    ):
+        async with client.stream(
+            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"}
+        ) as r:
+            async for _ in r.aiter_bytes():
+                pass
+
+    resp = await client.get("/sessions")
+    sessions = resp.json()
+    assert sessions[0]["title"] == "Machine Learning Basics"
+    _mock_title_gen.assert_awaited_once()
 
 
 @pytest.mark.asyncio

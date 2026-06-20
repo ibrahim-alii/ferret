@@ -56,6 +56,13 @@ async def rerank_node(state: dict) -> dict:
     # signal to rerank on and would otherwise abort the whole request.
     chunks = [c for c in state["retrieved_chunks"] if c.get("text", "").strip()]
     if not chunks:
+        if state["retrieved_chunks"]:
+            # Hits came back from Qdrant but none had SQLite text — a sign the two
+            # stores are out of sync. Surface it so it's diagnosable from logs.
+            logger.warning(
+                "All %d retrieved chunks have empty text; check SQLite/Qdrant sync",
+                len(state["retrieved_chunks"]),
+            )
         return {"reranked_children": []}
 
     headers = {

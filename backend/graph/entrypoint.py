@@ -17,6 +17,8 @@ async def astream_chat(
         "paper_id": paper_id,
         "user_message": user_message,
         "chat_history": chat_history,
+        "intent": None,
+        "query_vector": None,
         "retrieved_chunks": [],
         "reranked_children": [],
         "parent_sections": [],

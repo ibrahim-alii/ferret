@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -51,17 +50,6 @@ class Paper(Base):
         "Chunk", back_populates="paper", cascade="all, delete-orphan"
     )
 
-    def get_authors(self) -> list[str]:
-        try:
-            return json.loads(self.authors)
-        except (json.JSONDecodeError, TypeError):
-            import logging
-            logging.getLogger(__name__).warning("Malformed authors JSON for paper %s", self.arxiv_id)
-            return []
-
-    def set_authors(self, authors: list[str]) -> None:
-        self.authors = json.dumps(authors)
-
 
 class Chunk(Base):
     __tablename__ = "chunks"
@@ -94,6 +82,8 @@ class Session(Base):
     paper_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("papers.arxiv_id"), nullable=True
     )
+    # Short AI-generated label for the history sidebar, set after the first turn.
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now
     )
