@@ -146,9 +146,14 @@ def dev() -> None:
 # ---------------------------------------------------------------------------
 
 @app.command()
-def ingest(arxiv_id: str = typer.Argument(..., help="arXiv paper ID")) -> None:
+def ingest(
+    arxiv_id: str = typer.Argument(..., help="arXiv paper ID"),
+    force: bool = typer.Option(
+        False, "--force", help="Re-ingest even if already 'full' (repairs Qdrant drift)."
+    ),
+) -> None:
     """Ingest a paper from arXiv into the knowledge base."""
-    result = asyncio.run(ingest_paper(arxiv_id))
+    result = asyncio.run(ingest_paper(arxiv_id, force=force))
     typer.echo(f"Status: {result.ingestion_status}")
     typer.echo(f"Title:  {result.title}")
 

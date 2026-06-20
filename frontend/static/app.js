@@ -41,7 +41,13 @@ export function parseSSEChunk(chunk) {
 export function buildMessageEl(role, text) {
   const el = document.createElement('div');
   el.classList.add('msg', `msg-${role}`);
-  el.textContent = text;
+  // Assistant messages are markdown (rendered safely; renderMarkdown escapes first).
+  // User messages stay plain text so their content can never inject markup.
+  if (role === 'assistant') {
+    el.innerHTML = renderMarkdown(text);
+  } else {
+    el.textContent = text;
+  }
   return el;
 }
 
@@ -53,68 +59,80 @@ export function buildInterimEl(text) {
 }
 
 /**
- * A Claude-style "thinking" panel: shows the current step with a spinner while
- * the assistant works, keeps a trail of completed steps, then collapses into a
- * "Thought for Ns" summary (click to expand the trail) once the answer starts.
- * Returns { el, setStep(text), collapse() }.
+ * A live step list (stepper): the current task shows a spinner; when the next
+ * task starts, the prior task's spinner turns into a ✓ tick and a new active row
+ * appears. Driven by real SSE status events. Returns
+ * { el, setStep(text), updateStep(text), complete() }.
  */
 export function buildThinkingPanel() {
-  const startedAt = Date.now();
-
   const el = document.createElement('div');
   el.classList.add('thinking-panel');
+  // role="log" announces each appended step additively (aria-atomic defaults to
+  // false), rather than re-reading the whole growing list as role="status" would.
+  el.setAttribute('role', 'log');
+  el.setAttribute('aria-live', 'polite');
 
-  const current = document.createElement('div');
-  current.classList.add('thinking-current');
-  const spinner = document.createElement('span');
-  spinner.classList.add('thinking-spinner');
-  const label = document.createElement('span');
-  label.classList.add('thinking-label');
-  current.appendChild(spinner);
-  current.appendChild(label);
+  let activeRow = null;
+  let activeLabel = null;
 
-  const trail = document.createElement('div');
-  trail.classList.add('thinking-trail');
-  trail.hidden = true;
-
-  el.appendChild(current);
-  el.appendChild(trail);
-
-  function archiveCurrent() {
-    if (!label.textContent) return;
-    const done = document.createElement('div');
-    done.classList.add('thinking-step');
-    done.textContent = label.textContent;
-    trail.appendChild(done);
+  function markActiveDone() {
+    if (!activeRow) return;
+    activeRow.classList.add('step-done');
+    const spinner = activeRow.querySelector('.thinking-spinner');
+    if (spinner) spinner.remove();
+    // Real DOM tick (not a CSS ::before, which Chrome/Safari don't expose to the
+    // accessibility tree) so completion is announced. aria-label reads as "done".
+    const tick = document.createElement('span');
+    tick.classList.add('step-tick');
+    tick.textContent = '✓';
+    tick.setAttribute('role', 'img');
+    tick.setAttribute('aria-label', 'done');
+    activeRow.insertBefore(tick, activeRow.firstChild);
   }
 
   function setStep(text) {
     if (!text) return;
-    archiveCurrent();
+    markActiveDone();
+
+    const row = document.createElement('div');
+    row.classList.add('step-row');
+    const spinner = document.createElement('span');
+    spinner.classList.add('thinking-spinner');
+    const label = document.createElement('span');
+    label.classList.add('step-label');
     label.textContent = text;
+    row.appendChild(spinner);
+    row.appendChild(label);
+    el.appendChild(row);
+
+    activeRow = row;
+    activeLabel = label;
   }
 
-  function collapse() {
-    archiveCurrent();
-    const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-    el.classList.add('thinking-collapsed');
-    spinner.remove();
-    label.textContent = `Thought for ${secs}s`;
-    current.classList.add('thinking-summary');
-    current.addEventListener('click', () => { trail.hidden = !trail.hidden; });
+  function updateStep(text) {
+    if (!text || !activeLabel) return;
+    activeLabel.textContent = text;
   }
 
-  return { el, setStep, collapse };
+  function complete() {
+    markActiveDone();
+  }
+
+  return { el, setStep, updateStep, complete };
 }
 
+// A source-paper "pill": shows the title, links to the arXiv abstract page, and
+// reveals the abstract snippet (or title) on hover. Falls back to the arxiv id
+// when no title is available.
 export function buildCitationEl({ arxiv_id, title, abstract_snippet }) {
-  const el = document.createElement('div');
-  el.classList.add('citation');
-  el.innerHTML = `
-    <span class="citation-id">${escHtml(arxiv_id)}</span>
-    <span class="citation-title">${escHtml(title)}</span>
-    <span class="citation-snippet">${escHtml(abstract_snippet)}</span>
-  `;
+  const el = document.createElement('a');
+  el.classList.add('citation-pill');
+  const id = encodeURIComponent(String(arxiv_id || '').trim());
+  el.href = `https://arxiv.org/abs/${id}`;
+  el.target = '_blank';
+  el.rel = 'noopener noreferrer';
+  el.title = (abstract_snippet || title || arxiv_id || '').toString();
+  el.textContent = title || arxiv_id || 'source';
   return el;
 }
 
@@ -137,6 +155,69 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ─── Minimal markdown renderer (dependency-free, applied after streaming) ─────
+//
+// The LLM emits markdown; the typewriter streams it as plain text, then we render
+// the finished text to formatted HTML. Everything is HTML-escaped *first*, so the
+// only tags in the output are the ones we add — no XSS via user/model content.
+// Supports: fenced + inline code, bold, italic, headers, unordered/ordered lists,
+// and [text](url) links restricted to http(s) URLs.
+
+function renderInline(text) {
+  // `text` is already HTML-escaped. Apply inline spans in an order that won't
+  // re-process the HTML we insert (code first, so emphasis inside code is literal).
+  return text
+    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    .replace(/\*\*([^*]+)\*\*/g, (_, b) => `<strong>${b}</strong>`)
+    .replace(/(^|[^*])\*([^*]+)\*/g, (_, pre, i) => `${pre}<em>${i}</em>`);
+}
+
+export function renderMarkdown(raw) {
+  if (!raw) return '';
+  const lines = escHtml(raw).split('\n');
+  const html = [];
+  let listType = null;       // 'ul' | 'ol' | null
+  let inCode = false;
+  let codeBuf = [];
+
+  const closeList = () => { if (listType) { html.push(`</${listType}>`); listType = null; } };
+
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      if (inCode) { html.push(`<pre><code>${codeBuf.join('\n')}</code></pre>`); codeBuf = []; inCode = false; }
+      else { closeList(); inCode = true; }
+      continue;
+    }
+    if (inCode) { codeBuf.push(line); continue; }
+
+    const header = line.match(/^(#{1,4})\s+(.*)$/);
+    const ulItem = line.match(/^\s*[-*]\s+(.*)$/);
+    const olItem = line.match(/^\s*\d+\.\s+(.*)$/);
+
+    if (header) {
+      closeList();
+      const level = header[1].length;
+      html.push(`<h${level}>${renderInline(header[2])}</h${level}>`);
+    } else if (ulItem) {
+      if (listType !== 'ul') { closeList(); html.push('<ul>'); listType = 'ul'; }
+      html.push(`<li>${renderInline(ulItem[1])}</li>`);
+    } else if (olItem) {
+      if (listType !== 'ol') { closeList(); html.push('<ol>'); listType = 'ol'; }
+      html.push(`<li>${renderInline(olItem[1])}</li>`);
+    } else if (!line.trim()) {
+      closeList();
+    } else {
+      closeList();
+      html.push(`<p>${renderInline(line)}</p>`);
+    }
+  }
+  if (inCode) html.push(`<pre><code>${codeBuf.join('\n')}</code></pre>`);
+  closeList();
+  return html.join('');
 }
 
 // ─── Typewriter (gentle streaming reveal) ─────────────────────────────────────
@@ -443,7 +524,7 @@ function initApp() {
     await loadSessionHistory(state.sessionId, (msg) => {
       chatList.appendChild(buildMessageEl(msg.role, msg.content));
     });
-    scrollBottom();
+    scrollBottom({ force: true });
     enableChat(chatInput, chatBtn);
     refreshSessions();
   }
@@ -466,7 +547,7 @@ function initApp() {
       await loadSessionHistory(state.sessionId, (msg) => {
         chatList.appendChild(buildMessageEl(msg.role, msg.content));
       });
-      scrollBottom();
+      scrollBottom({ force: true });
       enableChat(chatInput, chatBtn);
       refreshSessions();
     } catch {
@@ -534,7 +615,7 @@ function initApp() {
           await loadSessionHistory(state.sessionId, (msg) => {
             chatList.appendChild(buildMessageEl(msg.role, msg.content));
           });
-          scrollBottom();
+          scrollBottom({ force: true });
           enableChat(chatInput, chatBtn);
           arxivBtn.disabled = false;
           refreshSessions();
@@ -573,25 +654,27 @@ function initApp() {
 
     chatList.appendChild(buildMessageEl('user', text));
 
+    // Stepper is created up front but appended lazily on the first real
+    // (non-chat) status, so conversational turns show no panel at all.
     const thinking = buildThinkingPanel();
-    thinking.setStep('Thinking');
-    chatList.appendChild(thinking.el);
 
     const assistantEl = buildMessageEl('assistant', '');
     chatList.appendChild(assistantEl);
     const citationContainer = document.createElement('div');
     citationContainer.classList.add('citations');
     chatList.appendChild(citationContainer);
-    scrollBottom();
+    scrollBottom({ force: true });
 
-    let collapsed = false;
-    const collapseOnce = () => {
-      if (!collapsed) { thinking.collapse(); collapsed = true; }
+    let isChat = false;
+    let completed = false;
+    const completeOnce = () => {
+      if (!completed && thinking.el.isConnected) thinking.complete();
+      completed = true;
     };
 
     let errored = false;
     const typewriter = createTypewriter(assistantEl, {
-      onFirstChar: collapseOnce,
+      onFirstChar: completeOnce,
       onReveal: scrollBottom,
     });
 
@@ -599,14 +682,24 @@ function initApp() {
       `${BACKEND}/sessions/${state.sessionId}/messages`,
       { content: text },
       {
-        onStatus:  (t) => { thinking.setStep(t); scrollBottom(); },
+        onStatus:  (t, step) => {
+          if (step === 'chatting') { isChat = true; return; }
+          if (isChat) return;
+          if (!thinking.el.isConnected) chatList.insertBefore(thinking.el, assistantEl);
+          thinking.setStep(t);
+          scrollBottom();
+        },
         onToken:   (t) => { typewriter.push(t); },
-        onInterim: (t) => { thinking.setStep(t); scrollBottom(); },
-        onCitation:(c) => { collapseOnce(); citationContainer.appendChild(buildCitationEl(c)); scrollBottom(); },
+        onInterim: (t) => {
+          if (isChat || !thinking.el.isConnected) return;
+          thinking.updateStep(t);
+          scrollBottom();
+        },
+        onCitation:(c) => { completeOnce(); citationContainer.appendChild(buildCitationEl(c)); scrollBottom(); },
         onDone:    ()  => {},
         onError:   ()  => {
           errored = true;
-          thinking.el.remove();
+          if (thinking.el.isConnected) thinking.el.remove();
           assistantEl.textContent = '[Error — please try again]';
           assistantEl.classList.add('msg-error');
           enableChat(chatInput, chatBtn);
@@ -616,13 +709,23 @@ function initApp() {
 
     if (!errored) {
       await typewriter.finish();
-      collapseOnce();
+      // The typewriter streamed raw markdown as plain text; now render it formatted.
+      assistantEl.innerHTML = renderMarkdown(assistantEl.textContent);
+      completeOnce();
       enableChat(chatInput, chatBtn);
       refreshSessions();
     }
   }
 
-  function scrollBottom() {
-    chatList.scrollTop = chatList.scrollHeight;
+  const STICK_THRESHOLD_PX = 80;
+  let stickToBottom = true;
+  function atBottom() {
+    const gap = chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight;
+    return gap <= STICK_THRESHOLD_PX;
+  }
+  chatList.addEventListener('scroll', () => { stickToBottom = atBottom(); });
+  function scrollBottom({ force = false } = {}) {
+    if (force) stickToBottom = true;
+    if (stickToBottom) chatList.scrollTop = chatList.scrollHeight;
   }
 }

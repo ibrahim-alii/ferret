@@ -54,7 +54,7 @@ async def _enrich_with_text(scored: list[ScoredChunk]) -> list[dict]:
 
 
 async def retrieve_node(state: dict) -> dict:
-    emit({"type": "status", "step": "retrieving", "content": "Searching papers"})
+    emit({"type": "status", "step": "retrieving", "content": "Searching knowledge base"})
     limit = int(os.environ.get("RERANK_CANDIDATE_COUNT", "30"))
 
     # The query embedding is invariant across corrective-loop iterations (only the

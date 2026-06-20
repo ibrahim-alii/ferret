@@ -264,7 +264,7 @@ async def test_get_sessions_uses_fallback_title_without_messages(client):
 # ---------------------------------------------------------------------------
 
 MOCK_STREAM_EVENTS = [
-    {"type": "status", "step": "retrieving", "content": "Searching papers"},
+    {"type": "status", "step": "retrieving", "content": "Searching knowledge base"},
     {"type": "token", "content": "Hello"},
     {"type": "token", "content": " world"},
     {"type": "done", "content": "Hello world", "cited_papers": []},

@@ -47,7 +47,6 @@ async def _rerank_with_retry(payload: dict, headers: dict) -> dict:
 
 
 async def rerank_node(state: dict) -> dict:
-    emit({"type": "status", "step": "reranking", "content": "Ranking results"})
     rerank_model = os.environ.get("JINA_RERANK_MODEL", "jina-reranker-v2-base-multilingual")
     top_k = int(os.environ.get("RERANK_TOP_K", "5"))
 
@@ -64,6 +63,9 @@ async def rerank_node(state: dict) -> dict:
                 len(state["retrieved_chunks"]),
             )
         return {"reranked_children": []}
+
+    n = len(chunks)
+    emit({"type": "status", "step": "reranking", "content": f"Ranking {n} passage{'s' if n != 1 else ''}"})
 
     headers = {
         "Authorization": f"Bearer {os.environ.get('JINA_API_KEY', '')}",

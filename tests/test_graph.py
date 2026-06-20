@@ -221,7 +221,7 @@ async def test_expand_node_fetches_parent_sections_for_reranked_children(monkeyp
 
     chunks = [make_chunk(chunk_id="c1", parent_chunk_id="p1", paper_id="arxiv1", score=0.9)]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -237,6 +237,7 @@ async def test_expand_node_fetches_parent_sections_for_reranked_children(monkeyp
 
     assert len(result["parent_sections"]) == 1
     assert result["parent_sections"][0]["text"] == "Parent text"
+    assert result["parent_sections"][0]["published_date"] == "2023-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -250,7 +251,7 @@ async def test_expand_node_dedupes_shared_parents(monkeypatch):
         make_chunk(chunk_id="c2", parent_chunk_id="p1", paper_id="arxiv1", score=0.8),
     ]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -282,7 +283,7 @@ async def test_expand_node_caps_distinct_parents(monkeypatch):
 
     async def fake_execute(sql, params=None):
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": f"text_{call_count}"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "section_name": "S", "text": f"text_{call_count}"})
         return mock_cursor
 
     mock_conn = AsyncMock()
@@ -447,7 +448,11 @@ async def test_deep_dive_insufficient_does_not_call_ingest(monkeypatch):
          patch("httpx.AsyncClient", return_value=mock_http_client), \
          patch("backend.graph.ingestion_graph.run_ingestion", mock_ingest):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive", user_message="Tell me about CRAG")
+        state = make_state(
+            mode="deep_dive",
+            user_message="Tell me about CRAG",
+            retrieved_chunks=[make_chunk()],
+        )
         await deep_dive_insufficient_node(state)
 
     assert not mock_ingest.called
@@ -494,7 +499,11 @@ async def test_deep_dive_insufficient_generates_arxiv_queries_via_grading_model(
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive", user_message="Tell me about CRAG")
+        state = make_state(
+            mode="deep_dive",
+            user_message="Tell me about CRAG",
+            retrieved_chunks=[make_chunk()],
+        )
         await deep_dive_insufficient_node(state)
 
     assert any("llama-3.1-8b-instant" in (m or "") for m in model_used)
@@ -538,7 +547,7 @@ async def test_deep_dive_insufficient_searches_arxiv_and_emits_citation_events(m
          patch("httpx.AsyncClient", return_value=mock_http_client), \
          patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive")
+        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
         await deep_dive_insufficient_node(state)
 
     citation_events = [e for e in emitted if e.get("type") == "citation"]
@@ -581,7 +590,7 @@ async def test_deep_dive_insufficient_response_includes_not_enough_info_message(
          patch("httpx.AsyncClient", return_value=mock_http_client), \
          patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive")
+        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
         await deep_dive_insufficient_node(state)
 
     token_events = [e for e in emitted if e.get("type") == "token"]
@@ -625,7 +634,7 @@ async def test_deep_dive_insufficient_does_not_write_sqlite(monkeypatch):
          patch("httpx.AsyncClient", return_value=mock_http_client), \
          patch("aiosqlite.connect", mock_aiosqlite_connect):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive")
+        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
         await deep_dive_insufficient_node(state)
 
     assert not mock_aiosqlite_connect.called
@@ -644,7 +653,7 @@ async def test_ask_sufficient_routes_to_generate_with_citations():
 
 
 @pytest.mark.asyncio
-async def test_ask_insufficient_streams_interim_message_before_corrective_step(monkeypatch):
+async def test_ask_insufficient_streams_searching_status_before_corrective_step(monkeypatch):
     monkeypatch.setenv("ASK_ARXIV_QUERY_COUNT", "3")
     monkeypatch.setenv("ASK_INGEST_CANDIDATES", "3")
     monkeypatch.setenv("CRAG_MAX_RETRIES", "2")
@@ -683,8 +692,12 @@ async def test_ask_insufficient_streams_interim_message_before_corrective_step(m
         state = make_state(mode="ask", retry_count=0)
         await ask_corrective_node(state)
 
-    interim_events = [e for e in emitted if e.get("type") == "interim_message"]
-    assert len(interim_events) >= 1
+    status_events = [
+        e for e in emitted
+        if e.get("type") == "status" and e.get("step") == "searching_arxiv"
+    ]
+    assert len(status_events) >= 1
+    assert status_events[0]["content"] == "Looking up papers on arXiv…"
 
 
 @pytest.mark.asyncio
@@ -914,6 +927,99 @@ async def test_generate_node_uses_generation_model_not_grading_model(monkeypatch
 
     assert "llama-3.3-70b-versatile" in models_used
     assert "llama-3.1-8b-instant" not in models_used
+
+
+def _fake_groq_stream(content="Hello"):
+    """Build a mock groq.AsyncGroq whose stream yields a single token."""
+    async def fake_stream(**kwargs):
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta = MagicMock()
+        chunk.choices[0].delta.content = content
+
+        class FakeStream:
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                if not hasattr(self, "_done"):
+                    self._done = True
+                    return chunk
+                raise StopAsyncIteration
+        return FakeStream()
+
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(side_effect=fake_stream)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    instance = MagicMock()
+    instance.chat = mock_chat
+    return instance
+
+
+@pytest.mark.asyncio
+async def test_generate_node_emits_deduped_citations(monkeypatch):
+    monkeypatch.setenv("GENERATION_MODEL", "m")
+    import backend.graph.nodes.generate as gen
+
+    # Make the abstract lookup a no-op so the test doesn't depend on a real DB.
+    def _no_db(*a, **k):
+        raise RuntimeError("no db in test")
+    monkeypatch.setattr(gen.aiosqlite, "connect", _no_db)
+
+    emitted: list[dict] = []
+    state = make_state(
+        intent="research",
+        parent_sections=[
+            {"paper_id": "2402.17764", "paper_title": "BitNet"},
+            {"paper_id": "2402.17764", "paper_title": "BitNet"},
+            {"paper_id": "2310.06825", "paper_title": "Mistral 7B"},
+        ],
+    )
+    with patch("groq.AsyncGroq", return_value=_fake_groq_stream()), \
+         patch("backend.graph.nodes.generate.emit", emitted.append):
+        await gen.generate_node(state)
+
+    cites = [e for e in emitted if e.get("type") == "citation"]
+    assert [c["arxiv_id"] for c in cites] == ["2402.17764", "2310.06825"]
+    assert cites[0]["title"] == "BitNet"
+
+
+@pytest.mark.asyncio
+async def test_generate_node_chat_intent_emits_no_citations(monkeypatch):
+    monkeypatch.setenv("GENERATION_MODEL", "m")
+    import backend.graph.nodes.generate as gen
+
+    emitted: list[dict] = []
+    state = make_state(intent="chat", parent_sections=[])
+    with patch("groq.AsyncGroq", return_value=_fake_groq_stream()), \
+         patch("backend.graph.nodes.generate.emit", emitted.append):
+        await gen.generate_node(state)
+
+    assert not [e for e in emitted if e.get("type") == "citation"]
+
+
+@pytest.mark.asyncio
+async def test_deep_dive_insufficient_zero_chunks_emits_drift_message_no_arxiv(monkeypatch):
+    # A Deep Dive that retrieved nothing means the paper isn't indexed (drift):
+    # emit an honest message and do NOT run a generic arXiv search.
+    async def _fail_groq(*a, **k):
+        raise AssertionError("should not call the LLM on the drift path")
+
+    def _fail_http(*a, **k):
+        raise AssertionError("should not hit arXiv on the drift path")
+
+    emitted: list[dict] = []
+    with patch("backend.graph.nodes.deep_dive_insufficient.groq_complete", _fail_groq), \
+         patch("httpx.AsyncClient", _fail_http), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
+        from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
+        state = make_state(mode="deep_dive", retrieved_chunks=[])
+        result = await deep_dive_insufficient_node(state)
+
+    assert result == {"citations": []}
+    assert not [e for e in emitted if e.get("type") == "citation"]
+    tokens = "".join(e.get("content", "") for e in emitted if e.get("type") == "token")
+    assert "out of sync" in tokens.lower()
 
 
 @pytest.mark.asyncio
@@ -1212,7 +1318,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_hybrid = AsyncMock(return_value=[high_score_chunk])
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": "context"})
+    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "section_name": "S", "text": "context"})
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock(return_value=mock_cursor)
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -1287,7 +1393,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     async def fake_execute(sql, params=None):
         execute_calls.append(sql.strip().upper())
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "section_name": "S", "text": "context"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "section_name": "S", "text": "context"})
         return mock_cursor
 
     mock_conn = AsyncMock()

@@ -14,7 +14,24 @@ ARXIV_NS = "http://www.w3.org/2005/Atom"
 
 
 async def deep_dive_insufficient_node(state: dict) -> dict:
-    emit({"type": "status", "step": "searching_arxiv", "content": "Searching arXiv"})
+    # Drift guard: a Deep Dive that retrieved *nothing* means the chosen paper has no
+    # vectors in the index (SQLite<->Qdrant drift), not that the question is off-topic.
+    # Suggesting arbitrary arXiv papers here is misleading, so return an honest message
+    # instead of a generic cross-corpus search.
+    if state.get("mode") == "deep_dive" and not state.get("retrieved_chunks"):
+        emit(
+            {
+                "type": "token",
+                "content": (
+                    "I couldn't find this content in the selected paper — its search "
+                    "index may be out of sync. Try re-ingesting the paper and asking again."
+                ),
+            }
+        )
+        emit({"type": "done"})
+        return {"citations": []}
+
+    emit({"type": "status", "step": "searching_arxiv", "content": "Looking up related papers…"})
     grading_model = os.environ.get("GRADING_MODEL", "llama-3.1-8b-instant")
     user_message = state.get("user_message", "")
 

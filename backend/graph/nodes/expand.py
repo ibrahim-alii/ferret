@@ -26,7 +26,7 @@ async def expand_node(state: dict) -> dict:
 
             cursor = await conn.execute(
                 "SELECT c.id, c.parent_chunk_id, p.arxiv_id AS paper_id,"
-                " p.title AS paper_title, c.section_name, c.text"
+                " p.title AS paper_title, p.published_date, c.section_name, c.text"
                 " FROM chunks c JOIN papers p ON c.paper_id = p.id"
                 " WHERE c.id = ?",
                 (parent_id,),
@@ -39,6 +39,7 @@ async def expand_node(state: dict) -> dict:
                         "text": row["text"],
                         "paper_id": row["paper_id"],
                         "paper_title": row["paper_title"],
+                        "published_date": row["published_date"],
                         "section_title": row["section_name"],
                     }
                 )

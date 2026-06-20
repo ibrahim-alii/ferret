@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from backend.db.models import Chunk, Paper
 from backend.db.session import async_session
@@ -19,7 +19,7 @@ from backend.ingestion.chunker import chunk_sections
 from backend.ingestion.embedder import embed_chunks
 from backend.ingestion.filter import filter_sections
 from backend.ingestion.parser import parse
-from backend.vectorstore.interface import ChunkVector, upsert_chunks
+from backend.vectorstore.interface import ChunkVector, delete_paper_points, upsert_chunks
 
 log = logging.getLogger(__name__)
 
@@ -32,16 +32,18 @@ class PaperRecord:
     ingestion_status: str
 
 
-async def ingest_paper(arxiv_id: str) -> PaperRecord:
+async def ingest_paper(arxiv_id: str, force: bool = False) -> PaperRecord:
     """
     Fetch, parse, chunk, embed, and store an arxiv paper.
-    Idempotent: returns existing record immediately if ingestion_status == 'full'.
+    Idempotent: returns existing record immediately if ingestion_status == 'full',
+    unless force=True, which re-runs the pipeline and replaces existing chunks/vectors
+    (used to repair SQLite<->Qdrant drift).
 
     On any unrecoverable error the paper row is marked 'failed' (so the frontend's
     polling loop terminates instead of waiting on 'pending' forever), then re-raised.
     """
     try:
-        return await _run_ingestion(arxiv_id)
+        return await _run_ingestion(arxiv_id, force=force)
     except Exception:
         log.exception("Ingestion failed for %s; marking paper as failed", arxiv_id)
         await _mark_failed(arxiv_id)
@@ -63,12 +65,12 @@ async def _mark_failed(arxiv_id: str) -> None:
         log.exception("Could not mark paper %s as failed", arxiv_id)
 
 
-async def _run_ingestion(arxiv_id: str) -> PaperRecord:
+async def _run_ingestion(arxiv_id: str, force: bool = False) -> PaperRecord:
     async with async_session() as session:
         result = await session.execute(select(Paper).where(Paper.arxiv_id == arxiv_id))
         existing = result.scalar_one_or_none()
 
-        if existing is not None and existing.ingestion_status == "full":
+        if existing is not None and existing.ingestion_status == "full" and not force:
             log.debug("Paper %s already fully ingested; skipping", arxiv_id)
             return PaperRecord(
                 arxiv_id=existing.arxiv_id,
@@ -118,6 +120,12 @@ async def _run_ingestion(arxiv_id: str) -> PaperRecord:
             paper.published_date = published_date
 
         await session.flush()  # assigns paper.id
+
+        # Re-ingest: drop any prior chunks (SQLite) and vectors (Qdrant) for this paper
+        # so a forced re-run can't leave duplicate chunks or orphaned points behind.
+        if existing is not None:
+            await session.execute(delete(Chunk).where(Chunk.paper_id == paper.id))
+            await delete_paper_points(paper.arxiv_id)
 
         for chunk in parents + children:
             chunk.paper_id = paper.id

@@ -147,7 +147,16 @@ class TestFerretIngest:
         )
         result = runner.invoke(app, ["ingest", "2401.00001"])
         assert result.exit_code == 0
-        mock_ingest.assert_awaited_once_with("2401.00001")
+        mock_ingest.assert_awaited_once_with("2401.00001", force=False)
+
+    @patch("backend.cli.main.ingest_paper", new_callable=AsyncMock)
+    def test_ingest_force_flag_passes_force_true(self, mock_ingest):
+        mock_ingest.return_value = PaperRecord(
+            arxiv_id="2401.00001", title="Test Paper", abstract="", ingestion_status="full"
+        )
+        result = runner.invoke(app, ["ingest", "2401.00001", "--force"])
+        assert result.exit_code == 0
+        mock_ingest.assert_awaited_once_with("2401.00001", force=True)
 
     @patch("backend.cli.main.ingest_paper", new_callable=AsyncMock)
     def test_ingest_prints_status_and_title(self, mock_ingest):

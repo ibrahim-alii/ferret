@@ -112,6 +112,16 @@ async def _upsert_chunks(client: AsyncQdrantClient, chunks: list[ChunkVector]) -
             raise
 
 
+async def _delete_paper_points(client: AsyncQdrantClient, paper_id: str) -> None:
+    name = _collection_name()
+    await client.delete(
+        collection_name=name,
+        points_selector=Filter(
+            must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id))]
+        ),
+    )
+
+
 async def _hybrid_search(
     client: AsyncQdrantClient,
     query_dense: list[float],
@@ -190,6 +200,12 @@ async def upsert_chunks(chunks: list[ChunkVector]) -> None:
     """Batch-upsert chunks into Qdrant. Consumed by module 1 (ingestion)."""
     async with get_client() as client:
         await _upsert_chunks(client, chunks)
+
+
+async def delete_paper_points(paper_id: str) -> None:
+    """Delete all points for one paper (by arxiv_id payload). Used by forced re-ingest."""
+    async with get_client() as client:
+        await _delete_paper_points(client, paper_id)
 
 
 async def hybrid_search(

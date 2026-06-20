@@ -16,6 +16,7 @@ import {
   consumeSSEStream,
   loadSessions,
   createTypewriter,
+  renderMarkdown,
 } from '../static/app.js';
 
 // ─── SSE frame parsing ────────────────────────────────────────────────────────
@@ -82,6 +83,14 @@ describe('buildMessageEl', () => {
     const el = buildMessageEl('assistant', '');
     expect(el.classList.contains('msg-assistant')).toBe(true);
   });
+
+  it('renders assistant markdown but keeps user text literal', () => {
+    const assistant = buildMessageEl('assistant', 'see **this**');
+    expect(assistant.querySelector('strong')?.textContent).toBe('this');
+    const user = buildMessageEl('user', 'see **this**');
+    expect(user.querySelector('strong')).toBeNull();
+    expect(user.textContent).toBe('see **this**');
+  });
 });
 
 describe('buildInterimEl', () => {
@@ -93,15 +102,72 @@ describe('buildInterimEl', () => {
 });
 
 describe('buildCitationEl', () => {
-  it('test_citation_events_render_arxiv_id_title_abstract_snippet — renders all fields', () => {
+  it('renders a source pill linking to the arXiv abstract page', () => {
     const el = buildCitationEl({
       arxiv_id: '2301.00001',
       title: 'Test Paper',
       abstract_snippet: 'A short snippet.',
     });
-    expect(el.textContent).toContain('2301.00001');
-    expect(el.textContent).toContain('Test Paper');
-    expect(el.textContent).toContain('A short snippet.');
+    expect(el.tagName).toBe('A');
+    expect(el.classList.contains('citation-pill')).toBe(true);
+    expect(el.getAttribute('href')).toBe('https://arxiv.org/abs/2301.00001');
+    expect(el.getAttribute('target')).toBe('_blank');
+    expect(el.getAttribute('rel')).toContain('noopener');
+    expect(el.textContent).toBe('Test Paper');
+    // Hover tooltip prefers the abstract snippet.
+    expect(el.title).toBe('A short snippet.');
+  });
+
+  it('falls back to the arxiv id when no title is given', () => {
+    const el = buildCitationEl({ arxiv_id: '2402.17764', title: '', abstract_snippet: null });
+    expect(el.textContent).toBe('2402.17764');
+    expect(el.title).toBe('2402.17764');
+  });
+
+  it('escapes a malicious title (textContent, not HTML)', () => {
+    const el = buildCitationEl({ arxiv_id: '1', title: '<img src=x onerror=alert(1)>' });
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.textContent).toBe('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('renderMarkdown', () => {
+  it('renders bold, italic, and inline code', () => {
+    const html = renderMarkdown('a **bold** and *italic* and `code` here');
+    expect(html).toContain('<strong>bold</strong>');
+    expect(html).toContain('<em>italic</em>');
+    expect(html).toContain('<code>code</code>');
+  });
+
+  it('renders headers and unordered/ordered lists', () => {
+    expect(renderMarkdown('# Title')).toContain('<h1>Title</h1>');
+    const ul = renderMarkdown('- one\n- two');
+    expect(ul).toContain('<ul>');
+    expect(ul).toContain('<li>one</li>');
+    const ol = renderMarkdown('1. first\n2. second');
+    expect(ol).toContain('<ol>');
+    expect(ol).toContain('<li>first</li>');
+  });
+
+  it('renders fenced code blocks literally', () => {
+    const html = renderMarkdown('```\nlet x = **not bold**\n```');
+    expect(html).toContain('<pre><code>');
+    expect(html).toContain('let x = **not bold**');
+    expect(html).not.toContain('<strong>');
+  });
+
+  it('renders http links but neutralizes javascript: hrefs', () => {
+    const ok = renderMarkdown('[arxiv](https://arxiv.org/abs/1)');
+    expect(ok).toContain('href="https://arxiv.org/abs/1"');
+    const bad = renderMarkdown('[x](javascript:alert(1))');
+    expect(bad).not.toContain('href="javascript:');
+  });
+
+  it('escapes raw HTML so script/img payloads cannot execute', () => {
+    const html = renderMarkdown('<script>alert(1)</script><img src=x onerror=alert(1)>');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;script&gt;');
   });
 });
 
@@ -307,35 +373,54 @@ describe('loadSessionHistory (exported helper)', () => {
 
 // ─── Thinking panel ──────────────────────────────────────────────────────────
 
-describe('buildThinkingPanel', () => {
-  it('renders a panel with a spinner and updates the current step', () => {
+describe('buildThinkingPanel (stepper)', () => {
+  it('starts empty (no pre-seeded step) and is an aria-live status region', () => {
     const panel = buildThinkingPanel();
     expect(panel.el.classList.contains('thinking-panel')).toBe(true);
-    expect(panel.el.querySelector('.thinking-spinner')).not.toBeNull();
-
-    panel.setStep('Searching papers');
-    expect(panel.el.querySelector('.thinking-label').textContent).toBe('Searching papers');
+    expect(panel.el.getAttribute('role')).toBe('log');
+    expect(panel.el.getAttribute('aria-live')).toBe('polite');
+    expect(panel.el.querySelectorAll('.step-row')).toHaveLength(0);
   });
 
-  it('archives prior steps into the trail when the step changes', () => {
+  it('setStep appends an active spinner row and marks the prior row done', () => {
     const panel = buildThinkingPanel();
-    panel.setStep('Searching papers');
-    panel.setStep('Writing answer');
 
-    const trailSteps = panel.el.querySelectorAll('.thinking-trail .thinking-step');
-    expect(trailSteps).toHaveLength(1);
-    expect(trailSteps[0].textContent).toBe('Searching papers');
-    expect(panel.el.querySelector('.thinking-label').textContent).toBe('Writing answer');
+    panel.setStep('Searching knowledge base');
+    let rows = panel.el.querySelectorAll('.step-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('.thinking-spinner')).not.toBeNull();
+    expect(rows[0].querySelector('.step-label').textContent).toBe('Searching knowledge base');
+
+    panel.setStep('Drafting answer');
+    rows = panel.el.querySelectorAll('.step-row');
+    expect(rows).toHaveLength(2);
+    // Prior row is completed: spinner gone, .step-done added.
+    expect(rows[0].classList.contains('step-done')).toBe(true);
+    expect(rows[0].querySelector('.thinking-spinner')).toBeNull();
+    // New row is active with a spinner.
+    expect(rows[1].classList.contains('step-done')).toBe(false);
+    expect(rows[1].querySelector('.thinking-spinner')).not.toBeNull();
+    expect(rows[1].querySelector('.step-label').textContent).toBe('Drafting answer');
   });
 
-  it('collapse() removes the spinner and shows a "Thought for" summary', () => {
+  it('updateStep replaces the active row label in place without adding a row', () => {
     const panel = buildThinkingPanel();
-    panel.setStep('Searching papers');
-    panel.collapse();
+    panel.setStep('Ranking passages');
+    panel.updateStep('Ranking 12 passages');
 
-    expect(panel.el.classList.contains('thinking-collapsed')).toBe(true);
-    expect(panel.el.querySelector('.thinking-spinner')).toBeNull();
-    expect(panel.el.querySelector('.thinking-label').textContent).toMatch(/^Thought for \d+s$/);
+    const rows = panel.el.querySelectorAll('.step-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('.step-label').textContent).toBe('Ranking 12 passages');
+  });
+
+  it('complete() marks the active row done (✓ via .step-done, spinner removed)', () => {
+    const panel = buildThinkingPanel();
+    panel.setStep('Drafting answer');
+    panel.complete();
+
+    const rows = panel.el.querySelectorAll('.step-row');
+    expect(rows[0].classList.contains('step-done')).toBe(true);
+    expect(rows[0].querySelector('.thinking-spinner')).toBeNull();
   });
 });
 

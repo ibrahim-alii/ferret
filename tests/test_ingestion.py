@@ -142,6 +142,70 @@ class TestFetchMetadata:
         fetch_pdf_mock.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_already_full_paper_is_skipped_without_force(self):
+        """An already-'full' paper short-circuits: the pipeline never fetches."""
+        from backend.ingestion import ingest
+
+        existing = MagicMock(ingestion_status="full", arxiv_id="2301.00001",
+                             id=1, title="T", abstract="A")
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none = MagicMock(return_value=existing)
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        meta_mock = AsyncMock()
+        with (
+            patch("backend.ingestion.ingest.fetch_metadata", meta_mock),
+            patch("backend.ingestion.ingest.async_session", return_value=mock_ctx),
+        ):
+            await ingest.ingest_paper("2301.00001")
+
+        meta_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_reingests_full_paper_and_clears_old_vectors(self):
+        """force=True re-runs the pipeline and clears the paper's prior Qdrant points."""
+        from backend.ingestion import ingest
+
+        existing = MagicMock(ingestion_status="full", arxiv_id="2301.00001",
+                             id=1, title="T", abstract="A")
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none = MagicMock(return_value=existing)
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        meta_mock = AsyncMock(return_value={
+            "title": "T", "abstract": "A", "authors": ["X"],
+            "published_date": "2023-01-01T00:00:00Z",
+        })
+        delete_points_mock = AsyncMock()
+        with (
+            patch("backend.ingestion.ingest.fetch_metadata", meta_mock),
+            patch("backend.ingestion.ingest.fetch_html", AsyncMock(return_value="<html/>")),
+            patch("backend.ingestion.ingest.download_pdf", AsyncMock(return_value=b"")),
+            patch("backend.ingestion.ingest.parse", return_value=[]),
+            patch("backend.ingestion.ingest.filter_sections", return_value=[]),
+            patch("backend.ingestion.ingest.chunk_sections", return_value=([], [])),
+            patch("backend.ingestion.ingest.embed_chunks", AsyncMock(return_value=[])),
+            patch("backend.ingestion.ingest.upsert_chunks", AsyncMock()),
+            patch("backend.ingestion.ingest.delete_paper_points", delete_points_mock),
+            patch("backend.ingestion.ingest.async_session", return_value=mock_ctx),
+        ):
+            await ingest.ingest_paper("2301.00001", force=True)
+
+        meta_mock.assert_called_once()
+        delete_points_mock.assert_called_once_with("2301.00001")
+
+    @pytest.mark.asyncio
     async def test_download_and_metadata_fetch_run_concurrently(self):
         """asyncio.gather is used so both calls start before either finishes."""
         from backend.ingestion import ingest

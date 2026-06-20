@@ -50,8 +50,7 @@ async def ask_corrective_node(state: dict) -> dict:
     user_message = state.get("user_message", "")
     retry_count = state.get("retry_count", 0)
 
-    emit({"type": "status", "step": "searching_arxiv", "content": "Searching arXiv for new papers"})
-    emit({"type": "interim_message", "content": "Searching for additional sources..."})
+    emit({"type": "status", "step": "searching_arxiv", "content": "Looking up papers on arXiv…"})
 
     # Generate diverse queries. If the LLM is unavailable, fall back to a plain
     # keyword query from the user's message so the corrective branch still runs.

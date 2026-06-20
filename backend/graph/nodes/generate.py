@@ -1,6 +1,7 @@
 import logging
 import os
 
+import aiosqlite
 import groq
 import tiktoken
 
@@ -49,8 +50,12 @@ def _build_context(parent_sections: list[dict], budget_tokens: int) -> str:
         paper_title = section.get("paper_title", "") or section.get("paper_id", "")
         text = section.get("text", "")
         # Label by human-readable paper title (not the arXiv ID) so the model cites
-        # something the user actually recognizes.
-        label = f"[Source: {paper_title}]" + (f" [{section_title}]" if section_title else "")
+        # something the user actually recognizes. Include the publication year so the
+        # model can place each source in time and avoid presenting old and new work as
+        # equally "recent".
+        year = (section.get("published_date") or "")[:4]
+        source = f"{paper_title}, {year}" if year else paper_title
+        label = f"[Source: {source}]" + (f" [{section_title}]" if section_title else "")
         block = f"{label}\n{text}"
         block_tokens = _count_tokens(block)
         if used + block_tokens <= budget_tokens:
@@ -103,18 +108,35 @@ def _build_messages(
 
     context = _build_context(parent_sections, context_budget)
 
+    # Keep markdown emphasis sparse: the model otherwise bolds many ordinary
+    # words, which reads as cluttered. Reserve bold for a few genuinely key terms.
+    formatting_guidance = (
+        "Use markdown sparingly. Do not bold ordinary words. Reserve **bold** for "
+        "a handful of genuinely important or unfamiliar technical terms, and never "
+        "bold more than a few words in the entire response."
+    )
+
     if mode == "deep_dive":
         system_prompt = (
             "You are a deep research assistant analyzing a specific paper. "
             "Answer the user's question in depth using the provided sections from the paper. "
             "Refer to papers by their title (never the arXiv ID) and cite section titles "
-            "when referencing information."
+            "when referencing information. " + formatting_guidance
         )
     else:
         system_prompt = (
             "You are a research assistant with access to multiple papers. "
-            "Answer the user's question concisely using the provided context. "
-            "Refer to papers by their title, not the arXiv ID, when referencing information."
+            "Answer the user's question concisely using only the provided context; "
+            "do not add facts from outside knowledge. "
+            "Refer to papers by their title, not the arXiv ID, when referencing information. "
+            "Each source is labeled with its publication year; use it to distinguish older "
+            "from more recent work and do not present an older paper as a recent advance. "
+            "When the sources cover different approaches or come from different eras, "
+            "describe what each paper actually contributes separately rather than merging "
+            "them into a single unified narrative or ranked list. "
+            "The context is only the papers currently in the corpus, not a comprehensive "
+            "survey of the field, so do not imply your answer is complete or exhaustive. "
+            + formatting_guidance
         )
     if context:
         system_prompt += f"\n\nContext:\n{context}"
@@ -123,6 +145,52 @@ def _build_messages(
     messages.extend(_trim_history(chat_history, history_budget))
     messages.append({"role": "user", "content": user_message})
     return messages
+
+
+async def _emit_citations(parent_sections: list[dict]) -> None:
+    """Emit one citation event per unique source paper used in the answer.
+
+    parent_sections (from expand_node) already carry paper_id (arxiv id) and
+    paper_title; we add the abstract snippet via a single SQLite lookup for the
+    hover tooltip. Order is preserved so the most relevant paper appears first.
+    """
+    seen: set[str] = set()
+    ordered: list[tuple[str, str]] = []
+    for sec in parent_sections:
+        arxiv_id = sec.get("paper_id")
+        if not arxiv_id or arxiv_id in seen:
+            continue
+        seen.add(arxiv_id)
+        ordered.append((arxiv_id, sec.get("paper_title") or ""))
+
+    if not ordered:
+        return
+
+    abstracts: dict[str, str] = {}
+    db_path = os.environ.get("SQLITE_DB_PATH", "./backend/data/app.db")
+    try:
+        async with aiosqlite.connect(db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            placeholders = ",".join("?" * len(ordered))
+            cursor = await conn.execute(
+                f"SELECT arxiv_id, abstract FROM papers WHERE arxiv_id IN ({placeholders})",
+                [a for a, _ in ordered],
+            )
+            async for row in cursor:
+                abstracts[row["arxiv_id"]] = row["abstract"] or ""
+    except Exception:  # noqa: BLE001 — a missing snippet must not break the answer
+        logger.warning("Could not load abstracts for citations", exc_info=True)
+
+    for arxiv_id, title in ordered:
+        snippet = abstracts.get(arxiv_id, "")
+        emit(
+            {
+                "type": "citation",
+                "arxiv_id": arxiv_id,
+                "title": title,
+                "abstract_snippet": snippet[:200] if snippet else None,
+            }
+        )
 
 
 async def generate_node(state: dict) -> dict:
@@ -136,7 +204,7 @@ async def generate_node(state: dict) -> dict:
     mode = state.get("mode", "ask")
     intent = state.get("intent")
 
-    emit({"type": "status", "step": "generating", "content": "Writing answer"})
+    emit({"type": "status", "step": "generating", "content": "Drafting answer"})
 
     client = get_groq_client()
 
@@ -177,6 +245,10 @@ async def generate_node(state: dict) -> dict:
                 )
                 continue
             raise
+
+    # Grounded answers cite their source papers; conversational turns have none.
+    if intent != "chat":
+        await _emit_citations(parent_sections)
 
     emit({"type": "done"})
 

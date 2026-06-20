@@ -3,6 +3,7 @@ import os
 import re
 
 from backend.graph.nodes._llm import groq_complete
+from backend.graph.stream import emit
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def classify_node(state: dict) -> dict:
     message = state.get("user_message", "").strip()
 
     if not message or _CHITCHAT_RE.match(message):
+        emit({"type": "status", "step": "chatting", "content": "Replying…"})
         return {"intent": "chat"}
 
     model = os.environ.get("GRADING_MODEL", "llama-3.1-8b-instant")
@@ -55,4 +57,6 @@ async def classify_node(state: dict) -> dict:
         return {"intent": "research"}
 
     intent = "chat" if "chat" in answer.strip().lower() else "research"
+    if intent == "chat":
+        emit({"type": "status", "step": "chatting", "content": "Replying…"})
     return {"intent": intent}
