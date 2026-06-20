@@ -2,6 +2,7 @@ import logging
 import os
 
 from backend.graph.nodes._llm import get_groq_client
+from backend.graph.stream import emit
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def generate_node(state: dict) -> dict:
     messages.extend(chat_history)
     messages.append({"role": "user", "content": user_message})
 
-    stream_events: list[dict] = []
+    emit({"type": "status", "step": "generating", "content": "Writing answer"})
 
     client = get_groq_client()
     stream = await client.chat.completions.create(
@@ -57,8 +58,8 @@ async def generate_node(state: dict) -> dict:
     async for chunk in stream:
         delta = chunk.choices[0].delta
         if delta.content:
-            stream_events.append({"type": "token", "content": delta.content})
+            emit({"type": "token", "content": delta.content})
 
-    stream_events.append({"type": "done"})
+    emit({"type": "done"})
 
-    return {"stream_events": stream_events}
+    return {}

@@ -2,11 +2,13 @@ import logging
 import os
 
 from backend.graph.nodes._llm import groq_complete
+from backend.graph.stream import emit
 
 logger = logging.getLogger(__name__)
 
 
 async def grade_node(state: dict) -> dict:
+    emit({"type": "status", "step": "grading", "content": "Reading sections"})
     high_threshold = float(os.environ.get("GRADE_HIGH_THRESHOLD", "0.6"))
     low_threshold = float(os.environ.get("GRADE_LOW_THRESHOLD", "0.35"))
     grading_model = os.environ.get("GRADING_MODEL", "llama-3.1-8b-instant")

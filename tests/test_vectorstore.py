@@ -16,7 +16,7 @@ os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 os.environ.setdefault("QDRANT_API_KEY", "test-key")
 os.environ.setdefault("QDRANT_COLLECTION_NAME", "test_chunks")
 os.environ.setdefault("SPARSE_MODEL", "Qdrant/bm25")
-os.environ.setdefault("VOYAGE_EMBED_DIM", "1024")
+os.environ.setdefault("OPENAI_EMBED_DIM", "1536")
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ class TestEnsureCollection:
 
         assert "dense" in vectors_config, "dense named vector missing"
         dense_cfg = vectors_config["dense"]
-        assert dense_cfg.size == 1024, "dense vector size must equal VOYAGE_EMBED_DIM"
+        assert dense_cfg.size == 1536, "dense vector size must equal OPENAI_EMBED_DIM"
 
         assert "sparse" in sparse_vectors_config, "sparse named vector missing"
 

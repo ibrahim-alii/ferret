@@ -7,6 +7,7 @@ import httpx
 
 from backend.graph.ingestion_graph import run_ingestion
 from backend.graph.nodes._llm import groq_complete
+from backend.graph.stream import emit
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,8 @@ async def ask_corrective_node(state: dict) -> dict:
     user_message = state.get("user_message", "")
     retry_count = state.get("retry_count", 0)
 
-    stream_events: list[dict] = [
-        {"type": "interim_message", "content": "Searching for additional sources..."}
-    ]
+    emit({"type": "status", "step": "searching_arxiv", "content": "Searching arXiv for new papers"})
+    emit({"type": "interim_message", "content": "Searching for additional sources..."})
 
     # Generate diverse queries
     content = await groq_complete(
@@ -136,7 +136,6 @@ async def ask_corrective_node(state: dict) -> dict:
     new_retry_count = retry_count + 1
 
     return {
-        "stream_events": stream_events,
         "arxiv_queries": queries,
         "retry_count": new_retry_count,
     }

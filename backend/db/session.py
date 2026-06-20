@@ -20,6 +20,11 @@ async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 
 async def init_db() -> None:
+    # Ensure the SQLite parent directory exists (backend/data is gitignored and
+    # absent on a fresh clone, so create_all would fail to open the file).
+    parent = os.path.dirname(SQLITE_DB_PATH)
+    if parent and ":memory:" not in SQLITE_DB_PATH:
+        os.makedirs(parent, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

@@ -36,7 +36,6 @@ def make_state(**overrides):
         "citations": [],
         "interim_messages": [],
         "retry_count": 0,
-        "stream_events": [],
     }
     base.update(overrides)
     return base
@@ -48,18 +47,11 @@ def make_state(**overrides):
 
 @pytest.mark.asyncio
 async def test_retrieve_node_deep_dive_passes_paper_id_filter(monkeypatch):
-    monkeypatch.setenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
-    monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
-
-    mock_embed_result = MagicMock()
-    mock_embed_result.embeddings = [[0.1, 0.2, 0.3]]
-    mock_voyage = AsyncMock()
-    mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
 
     mock_hybrid = AsyncMock(return_value=[])
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+    with patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2, 0.3])), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid):
         from backend.graph.nodes.retrieve import retrieve_node
         state = make_state(mode="deep_dive", paper_id="arxiv123")
@@ -71,18 +63,11 @@ async def test_retrieve_node_deep_dive_passes_paper_id_filter(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retrieve_node_ask_passes_no_paper_id_filter(monkeypatch):
-    monkeypatch.setenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
-    monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
-
-    mock_embed_result = MagicMock()
-    mock_embed_result.embeddings = [[0.1, 0.2, 0.3]]
-    mock_voyage = AsyncMock()
-    mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
 
     mock_hybrid = AsyncMock(return_value=[])
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+    with patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2, 0.3])), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid):
         from backend.graph.nodes.retrieve import retrieve_node
         state = make_state(mode="ask", paper_id=None)
@@ -96,19 +81,11 @@ async def test_retrieve_node_ask_passes_no_paper_id_filter(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retrieve_node_calls_hybrid_search_with_query_dense_and_text(monkeypatch):
-    monkeypatch.setenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
-    monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
-
-    dense_vec = [0.1, 0.2, 0.3]
-    mock_embed_result = MagicMock()
-    mock_embed_result.embeddings = [dense_vec]
-    mock_voyage = AsyncMock()
-    mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
 
     mock_hybrid = AsyncMock(return_value=[])
 
-    with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+    with patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2, 0.3])), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid):
         from backend.graph.nodes.retrieve import retrieve_node
         state = make_state(user_message="What is CRAG?")
@@ -497,13 +474,16 @@ async def test_deep_dive_insufficient_searches_arxiv_and_emits_citation_events(m
     mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
     mock_http_client.__aexit__ = AsyncMock(return_value=False)
 
+    emitted: list[dict] = []
+
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
-         patch("httpx.AsyncClient", return_value=mock_http_client):
+         patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
         state = make_state(mode="deep_dive")
-        result = await deep_dive_insufficient_node(state)
+        await deep_dive_insufficient_node(state)
 
-    citation_events = [e for e in result["stream_events"] if e.get("type") == "citation"]
+    citation_events = [e for e in emitted if e.get("type") == "citation"]
     assert len(citation_events) >= 1
     assert "arxiv_id" in citation_events[0]
     assert "title" in citation_events[0]
@@ -537,13 +517,16 @@ async def test_deep_dive_insufficient_response_includes_not_enough_info_message(
     mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
     mock_http_client.__aexit__ = AsyncMock(return_value=False)
 
+    emitted: list[dict] = []
+
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
-         patch("httpx.AsyncClient", return_value=mock_http_client):
+         patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
         state = make_state(mode="deep_dive")
-        result = await deep_dive_insufficient_node(state)
+        await deep_dive_insufficient_node(state)
 
-    token_events = [e for e in result["stream_events"] if e.get("type") == "token"]
+    token_events = [e for e in emitted if e.get("type") == "token"]
     all_tokens = "".join(e.get("content", "") for e in token_events)
     assert (
         "not enough" in all_tokens.lower()
@@ -632,14 +615,17 @@ async def test_ask_insufficient_streams_interim_message_before_corrective_step(m
 
     mock_ingest = AsyncMock()
 
+    emitted: list[dict] = []
+
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client), \
-         patch("backend.graph.nodes.ask_corrective.run_ingestion", mock_ingest):
+         patch("backend.graph.nodes.ask_corrective.run_ingestion", mock_ingest), \
+         patch("backend.graph.nodes.ask_corrective.emit", emitted.append):
         from backend.graph.nodes.ask_corrective import ask_corrective_node
         state = make_state(mode="ask", retry_count=0)
-        result = await ask_corrective_node(state)
+        await ask_corrective_node(state)
 
-    interim_events = [e for e in result.get("stream_events", []) if e.get("type") == "interim_message"]
+    interim_events = [e for e in emitted if e.get("type") == "interim_message"]
     assert len(interim_events) >= 1
 
 
@@ -975,19 +961,15 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
     monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
     monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
-    monkeypatch.setenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
+    monkeypatch.setenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
     monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
     monkeypatch.setenv("GENERATION_MAX_PARENTS", "5")
     monkeypatch.setenv("SQLITE_DB_PATH", "test.db")
 
-    # Setup voyage mock
-    mock_embed_result = MagicMock()
-    mock_embed_result.embeddings = [[0.1, 0.2]]
+    # Voyage rerank mock (query embedding is mocked via embed_query in the patch below)
     mock_voyage = AsyncMock()
-    mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
-
     rerank_result = MagicMock()
     rerank_result.results = [MagicMock(index=0, relevance_score=0.9)]
     mock_voyage.rerank = AsyncMock(return_value=rerank_result)
@@ -1038,6 +1020,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_conn.__aexit__ = AsyncMock(return_value=False)
 
     with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+         patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2])), \
          patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid), \
          patch("aiosqlite.connect", return_value=mock_conn):
@@ -1058,18 +1041,14 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
     monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
     monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
-    monkeypatch.setenv("VOYAGE_EMBED_MODEL", "voyage-4-lite")
+    monkeypatch.setenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
     monkeypatch.setenv("VOYAGE_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
     monkeypatch.setenv("RERANK_TOP_K", "5")
     monkeypatch.setenv("GENERATION_MAX_PARENTS", "5")
     monkeypatch.setenv("SQLITE_DB_PATH", "test.db")
 
-    mock_embed_result = MagicMock()
-    mock_embed_result.embeddings = [[0.1, 0.2]]
     mock_voyage = AsyncMock()
-    mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
-
     rerank_result = MagicMock()
     rerank_result.results = [MagicMock(index=0, relevance_score=0.9)]
     mock_voyage.rerank = AsyncMock(return_value=rerank_result)
@@ -1121,6 +1100,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     mock_conn.__aexit__ = AsyncMock(return_value=False)
 
     with patch("voyageai.AsyncClient", return_value=mock_voyage), \
+         patch("backend.graph.nodes.retrieve.embed_query", AsyncMock(return_value=[0.1, 0.2])), \
          patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("backend.graph.nodes.retrieve.hybrid_search", mock_hybrid), \
          patch("aiosqlite.connect", return_value=mock_conn):

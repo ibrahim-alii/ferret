@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ChunkVector:
-    chunk_id: str
+    chunk_id: int  # SQLite chunks.id (autoincrement); also the Qdrant point id
     paper_id: str
     section_name: str
     chunk_type: str

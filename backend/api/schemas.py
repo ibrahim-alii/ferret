@@ -55,6 +55,14 @@ class PostSessionResponse(BaseModel):
     session_id: str
 
 
+class SessionSummary(BaseModel):
+    session_id: str
+    mode: str
+    paper_id: str | None = None
+    created_at: datetime
+    title: str
+
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------

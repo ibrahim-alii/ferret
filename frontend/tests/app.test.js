@@ -8,23 +8,26 @@ import {
   buildMessageEl,
   buildCitationEl,
   buildInterimEl,
+  buildThinkingPanel,
+  buildSessionEl,
   enableChat,
   disableChat,
   AppState,
   consumeSSEStream,
+  loadSessions,
 } from '../static/app.js';
 
 // ─── SSE frame parsing ────────────────────────────────────────────────────────
 
 describe('parseSSEChunk', () => {
   it('test_token_events_append_to_current_message_in_order — parses token event', () => {
-    const result = parseSSEChunk('event: token\ndata: {"text":"hello"}\n\n');
-    expect(result).toEqual({ type: 'token', payload: { text: 'hello' } });
+    const result = parseSSEChunk('event: token\ndata: {"content":"hello"}\n\n');
+    expect(result).toEqual({ type: 'token', payload: { content: 'hello' } });
   });
 
   it('test_interim_message_event — parses interim_message', () => {
-    const result = parseSSEChunk('event: interim_message\ndata: {"text":"Searching…"}\n\n');
-    expect(result).toEqual({ type: 'interim_message', payload: { text: 'Searching…' } });
+    const result = parseSSEChunk('event: interim_message\ndata: {"content":"Searching…"}\n\n');
+    expect(result).toEqual({ type: 'interim_message', payload: { content: 'Searching…' } });
   });
 
   it('test_citation_events — parses citation', () => {
@@ -40,6 +43,16 @@ describe('parseSSEChunk', () => {
   it('test_done_event_finalizes_message_and_reenables_input — parses done event', () => {
     const result = parseSSEChunk('event: done\ndata: {}\n\n');
     expect(result).toEqual({ type: 'done', payload: {} });
+  });
+
+  it('test_status_event — parses status step/content', () => {
+    const result = parseSSEChunk(
+      'event: status\ndata: {"step":"retrieving","content":"Searching papers"}\n\n'
+    );
+    expect(result).toEqual({
+      type: 'status',
+      payload: { step: 'retrieving', content: 'Searching papers' },
+    });
   });
 
   it('returns null for empty chunk', () => {
@@ -88,6 +101,39 @@ describe('buildCitationEl', () => {
     expect(el.textContent).toContain('2301.00001');
     expect(el.textContent).toContain('Test Paper');
     expect(el.textContent).toContain('A short snippet.');
+  });
+});
+
+describe('buildSessionEl', () => {
+  it('renders title and mode label and fires onSelect with the summary', () => {
+    const selected = [];
+    const summary = { session_id: 's1', mode: 'deep_dive', title: 'Attention paper' };
+    const el = buildSessionEl(summary, (s) => selected.push(s));
+    expect(el.textContent).toContain('Attention paper');
+    expect(el.textContent).toContain('Deep Dive');
+    expect(el.dataset.sessionId).toBe('s1');
+    el.click();
+    expect(selected).toEqual([summary]);
+  });
+
+  it('labels ask-mode sessions as Ask', () => {
+    const el = buildSessionEl({ session_id: 's2', mode: 'ask', title: 'hi' });
+    expect(el.textContent).toContain('Ask');
+  });
+});
+
+describe('loadSessions (exported helper)', () => {
+  it('returns the session list on success', async () => {
+    const list = [{ session_id: 's1', mode: 'ask', title: 'hi', created_at: '', paper_id: null }];
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => list });
+    const result = await loadSessions();
+    expect(result).toEqual(list);
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/sessions'));
+  });
+
+  it('returns [] on error response', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    expect(await loadSessions()).toEqual([]);
   });
 });
 
@@ -188,11 +234,11 @@ describe('checkIngestionStatus (exported helper)', () => {
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ status: 'full', id: 'paper-1' }),
+      json: async () => ({ ingestion_status: 'full', arxiv_id: '2301.00001' }),
     });
 
     const result = await checkIngestionStatus('2301.00001');
-    expect(result.status).toBe('full');
+    expect(result.ingestion_status).toBe('full');
     expect(result.ready).toBe(true);
   });
 
@@ -201,7 +247,7 @@ describe('checkIngestionStatus (exported helper)', () => {
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ status: 'processing', id: 'paper-1' }),
+      json: async () => ({ ingestion_status: 'pending', arxiv_id: '2301.00001' }),
     });
 
     const result = await checkIngestionStatus('2301.00001');
@@ -214,7 +260,7 @@ describe('checkIngestionStatus (exported helper)', () => {
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ status: 'failed', id: 'paper-1' }),
+      json: async () => ({ ingestion_status: 'failed', arxiv_id: '2301.00001' }),
     });
 
     const result = await checkIngestionStatus('2301.00001');
@@ -258,12 +304,76 @@ describe('loadSessionHistory (exported helper)', () => {
   });
 });
 
+// ─── Thinking panel ──────────────────────────────────────────────────────────
+
+describe('buildThinkingPanel', () => {
+  it('renders a panel with a spinner and updates the current step', () => {
+    const panel = buildThinkingPanel();
+    expect(panel.el.classList.contains('thinking-panel')).toBe(true);
+    expect(panel.el.querySelector('.thinking-spinner')).not.toBeNull();
+
+    panel.setStep('Searching papers');
+    expect(panel.el.querySelector('.thinking-label').textContent).toBe('Searching papers');
+  });
+
+  it('archives prior steps into the trail when the step changes', () => {
+    const panel = buildThinkingPanel();
+    panel.setStep('Searching papers');
+    panel.setStep('Writing answer');
+
+    const trailSteps = panel.el.querySelectorAll('.thinking-trail .thinking-step');
+    expect(trailSteps).toHaveLength(1);
+    expect(trailSteps[0].textContent).toBe('Searching papers');
+    expect(panel.el.querySelector('.thinking-label').textContent).toBe('Writing answer');
+  });
+
+  it('collapse() removes the spinner and shows a "Thought for" summary', () => {
+    const panel = buildThinkingPanel();
+    panel.setStep('Searching papers');
+    panel.collapse();
+
+    expect(panel.el.classList.contains('thinking-collapsed')).toBe(true);
+    expect(panel.el.querySelector('.thinking-spinner')).toBeNull();
+    expect(panel.el.querySelector('.thinking-label').textContent).toMatch(/^Thought for \d+s$/);
+  });
+});
+
 // ─── SSE fetch stream integration (mocked fetch) ─────────────────────────────
 
 describe('consumeSSEStream', () => {
+  it('test_status_events_drive_onStatus_in_order_before_tokens', async () => {
+    const chunks = [
+      'event: status\ndata: {"step":"retrieving","content":"Searching papers"}\n\n',
+      'event: status\ndata: {"step":"generating","content":"Writing answer"}\n\n',
+      'event: token\ndata: {"content":"Hi"}\n\n',
+      'event: done\ndata: {}\n\n',
+    ];
+    let chunkIdx = 0;
+    const mockReader = {
+      read: vi.fn().mockImplementation(async () => {
+        if (chunkIdx < chunks.length) {
+          return { done: false, value: new TextEncoder().encode(chunks[chunkIdx++]) };
+        }
+        return { done: true, value: undefined };
+      }),
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => mockReader } });
+
+    const statuses = [];
+    const tokens = [];
+    await consumeSSEStream(
+      '/sessions/s1/messages',
+      { content: 'hello' },
+      { onStatus: (c) => statuses.push(c), onToken: (t) => tokens.push(t), onDone: vi.fn() }
+    );
+
+    expect(statuses).toEqual(['Searching papers', 'Writing answer']);
+    expect(tokens).toEqual(['Hi']);
+  });
+
   it('test_post_message_consumes_sse_via_fetch_stream — calls fetch with POST and body', async () => {
     const chunks = [
-      'event: token\ndata: {"text":"Hi"}\n\n',
+      'event: token\ndata: {"content":"Hi"}\n\n',
       'event: done\ndata: {}\n\n',
     ];
     let chunkIdx = 0;

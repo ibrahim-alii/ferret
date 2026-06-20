@@ -1,18 +1,14 @@
-import asyncio
 import logging
 import os
 
 import aiosqlite
-import voyageai
 
+from backend.graph.stream import emit
+from backend.ingestion.embedder import embed_query
 from backend.vectorstore.models import ScoredChunk
 from backend.vectorstore.store import hybrid_search
 
 logger = logging.getLogger(__name__)
-
-# Shared across requests so VOYAGE_MAX_CONCURRENCY actually bounds total in-flight
-# Voyage calls, rather than allowing one full quota per concurrent request.
-_semaphore = asyncio.Semaphore(int(os.environ.get("VOYAGE_MAX_CONCURRENCY", "2")))
 
 
 async def _enrich_with_text(scored: list[ScoredChunk]) -> list[dict]:
@@ -58,17 +54,10 @@ async def _enrich_with_text(scored: list[ScoredChunk]) -> list[dict]:
 
 
 async def retrieve_node(state: dict) -> dict:
-    embed_model = os.environ.get("VOYAGE_EMBED_MODEL", "voyage-4-lite")
+    emit({"type": "status", "step": "retrieving", "content": "Searching papers"})
     limit = int(os.environ.get("RERANK_CANDIDATE_COUNT", "30"))
 
-    client = voyageai.AsyncClient()
-    async with _semaphore:
-        result = await client.embed(
-            [state["user_message"]],
-            model=embed_model,
-            input_type="query",
-        )
-    query_dense = result.embeddings[0]
+    query_dense = await embed_query(state["user_message"])
 
     paper_id = state["paper_id"] if state["mode"] == "deep_dive" else None
 

@@ -382,17 +382,17 @@ class TestEmbedder:
 
         chunks = [self._make_mock_chunk(f"text {i}", i) for i in range(10)]
         mock_embed_result = MagicMock()
-        mock_embed_result.embeddings = [[0.1] * 1024 for _ in range(10)]
+        mock_embed_result.data = [MagicMock(embedding=[0.1] * 1536) for _ in range(10)]
 
-        with patch("backend.ingestion.embedder.voyageai.AsyncClient") as mock_cls:
-            mock_voyage = AsyncMock()
-            mock_voyage.embed = AsyncMock(return_value=mock_embed_result)
-            mock_cls.return_value = mock_voyage
+        with patch("backend.ingestion.embedder.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.embeddings.create = AsyncMock(return_value=mock_embed_result)
+            mock_cls.return_value = mock_openai
 
-            with patch.dict("os.environ", {"VOYAGE_BATCH_SIZE": "10", "VOYAGE_API_KEY": "test-key"}):
+            with patch.dict("os.environ", {"OPENAI_BATCH_SIZE": "10", "OPENAI_API_KEY": "test-key"}):
                 result = await embed_chunks(chunks)
 
-        assert mock_voyage.embed.call_count == 1
+        assert mock_openai.embeddings.create.call_count == 1
         assert len(result) == 10
 
     @pytest.mark.asyncio
@@ -403,30 +403,53 @@ class TestEmbedder:
         active: list[int] = []
         max_active = [0]
 
-        async def fake_embed(texts, model, input_type):
+        async def fake_embed(input, model):
             active.append(1)
             max_active[0] = max(max_active[0], len(active))
             await asyncio.sleep(0.01)
             active.pop()
             result = MagicMock()
-            result.embeddings = [[0.1] * 1024 for _ in texts]
+            result.data = [MagicMock(embedding=[0.1] * 1536) for _ in input]
             return result
 
         chunks = [self._make_mock_chunk(f"text {i}", i) for i in range(10)]
 
-        with patch("backend.ingestion.embedder.voyageai.AsyncClient") as mock_cls:
-            mock_voyage = AsyncMock()
-            mock_voyage.embed = fake_embed
-            mock_cls.return_value = mock_voyage
+        with patch("backend.ingestion.embedder.AsyncOpenAI") as mock_cls:
+            mock_openai = MagicMock()
+            mock_openai.embeddings.create = fake_embed
+            mock_cls.return_value = mock_openai
 
             with patch.dict("os.environ", {
-                "VOYAGE_BATCH_SIZE": "2",
-                "VOYAGE_MAX_CONCURRENCY": str(max_concurrency),
-                "VOYAGE_API_KEY": "test-key",
+                "OPENAI_BATCH_SIZE": "2",
+                "OPENAI_MAX_CONCURRENCY": str(max_concurrency),
+                "OPENAI_API_KEY": "test-key",
             }):
                 await embed_chunks(chunks)
 
         assert max_active[0] <= max_concurrency
+
+    @pytest.mark.asyncio
+    async def test_embed_chunks_uses_gemini_when_local_flag_set(self):
+        from backend.ingestion.embedder import embed_chunks
+
+        chunks = [self._make_mock_chunk(f"text {i}", i) for i in range(3)]
+        mock_result = MagicMock()
+        mock_result.embeddings = [MagicMock(values=[0.2] * 1536) for _ in range(3)]
+        mock_client = MagicMock()
+        mock_client.aio.models.embed_content = AsyncMock(return_value=mock_result)
+
+        with patch("backend.ingestion.embedder.genai.Client", return_value=mock_client):
+            with patch.dict("os.environ", {
+                "USE_LOCAL_EMBEDDINGS": "true",
+                "GEMINI_API_KEY": "test-key",
+                "OPENAI_BATCH_SIZE": "10",
+            }):
+                result = await embed_chunks(chunks)
+
+        assert mock_client.aio.models.embed_content.call_count == 1
+        assert len(result) == 3
+        _, kwargs = mock_client.aio.models.embed_content.call_args
+        assert kwargs["config"].task_type == "RETRIEVAL_DOCUMENT"
 
 
 # ---------------------------------------------------------------------------
@@ -652,7 +675,7 @@ class TestIntegration:
         assert "attention" in result["title"].lower()
 
     @pytest.mark.asyncio
-    async def test_real_voyage_embedding_call(self):
+    async def test_real_openai_embedding_call(self):
         from backend.ingestion.embedder import embed_chunks
         chunk = MagicMock()
         chunk.text = "Transformers use self-attention mechanisms."

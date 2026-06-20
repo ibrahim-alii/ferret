@@ -36,7 +36,34 @@ async def ingest_paper(arxiv_id: str) -> PaperRecord:
     """
     Fetch, parse, chunk, embed, and store an arxiv paper.
     Idempotent: returns existing record immediately if ingestion_status == 'full'.
+
+    On any unrecoverable error the paper row is marked 'failed' (so the frontend's
+    polling loop terminates instead of waiting on 'pending' forever), then re-raised.
     """
+    try:
+        return await _run_ingestion(arxiv_id)
+    except Exception:
+        log.exception("Ingestion failed for %s; marking paper as failed", arxiv_id)
+        await _mark_failed(arxiv_id)
+        raise
+
+
+async def _mark_failed(arxiv_id: str) -> None:
+    """Best-effort write of ingestion_status='failed' in a fresh session."""
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(Paper).where(Paper.arxiv_id == arxiv_id))
+            paper = result.scalar_one_or_none()
+            if paper is None:
+                session.add(Paper(arxiv_id=arxiv_id, ingestion_status="failed"))
+            else:
+                paper.ingestion_status = "failed"
+            await session.commit()
+    except Exception:
+        log.exception("Could not mark paper %s as failed", arxiv_id)
+
+
+async def _run_ingestion(arxiv_id: str) -> PaperRecord:
     async with async_session() as session:
         result = await session.execute(select(Paper).where(Paper.arxiv_id == arxiv_id))
         existing = result.scalar_one_or_none()

@@ -45,7 +45,7 @@ def _collection_name() -> str:
 
 @cache
 def _embed_dim() -> int:
-    return int(os.environ.get("VOYAGE_EMBED_DIM", "1024"))
+    return int(os.environ.get("OPENAI_EMBED_DIM", "1536"))
 
 
 def _batched(iterable: Iterable[T], n: int) -> Iterator[list[T]]:

@@ -173,10 +173,60 @@ async def test_post_sessions_writes_session_row_to_sqlite(client, session_factor
 
 
 # ---------------------------------------------------------------------------
+# GET /sessions  — history sidebar
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_empty_when_none(client):
+    resp = await client.get("/sessions")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_lists_recent_with_title_from_first_message(client):
+    resp = await client.post("/sessions", json={"mode": "ask"})
+    sid = resp.json()["session_id"]
+
+    with patch(
+        "backend.api.routers.sessions.astream_chat",
+        side_effect=_fake_astream_chat,
+    ):
+        async with client.stream(
+            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"}
+        ) as r:
+            async for _ in r.aiter_bytes():
+                pass
+
+    resp = await client.get("/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert sessions[0]["session_id"] == sid
+    assert sessions[0]["mode"] == "ask"
+    assert sessions[0]["title"] == "What is ML?"
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_uses_fallback_title_without_messages(client):
+    resp = await client.post(
+        "/sessions", json={"mode": "ask"}
+    )
+    assert resp.status_code == 201
+
+    resp = await client.get("/sessions")
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert sessions[0]["title"] == "New chat"
+
+
+# ---------------------------------------------------------------------------
 # POST /sessions/{session_id}/messages  — SSE stream
 # ---------------------------------------------------------------------------
 
 MOCK_STREAM_EVENTS = [
+    {"type": "status", "step": "retrieving", "content": "Searching papers"},
     {"type": "token", "content": "Hello"},
     {"type": "token", "content": " world"},
     {"type": "done", "content": "Hello world", "cited_papers": []},
@@ -281,8 +331,11 @@ async def test_post_message_streams_sse_events(client):
             events = await collect_sse(r)
 
     event_types = [e["event"] for e in events]
+    assert "status" in event_types
     assert "token" in event_types
     assert "done" in event_types
+    # status step must arrive before the first token
+    assert event_types.index("status") < event_types.index("token")
 
 
 @pytest.mark.asyncio

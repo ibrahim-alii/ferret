@@ -25,11 +25,9 @@ async def astream_chat(
         "citations": [],
         "interim_messages": [],
         "retry_count": 0,
-        "stream_events": [],
     }
-    prev_count = 0
-    async for state_snapshot in _graph.astream(initial_state, stream_mode="values"):
-        events = state_snapshot.get("stream_events", [])
-        for event in events[prev_count:]:
-            yield event
-        prev_count = len(events)
+    # stream_mode="custom" surfaces each event a node passes to its stream writer
+    # the instant it is produced, so status/token/citation events flush live
+    # rather than being batched after each node returns.
+    async for event in _graph.astream(initial_state, stream_mode="custom"):
+        yield event

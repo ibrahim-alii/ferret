@@ -1,5 +1,4 @@
-import operator
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from typing_extensions import TypedDict
 
@@ -17,4 +16,3 @@ class GraphState(TypedDict):
     citations: list[dict[str, Any]]
     interim_messages: list[str]
     retry_count: int
-    stream_events: Annotated[list[dict[str, Any]], operator.add]

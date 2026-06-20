@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import enum
 import os
+import shutil
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -23,6 +25,9 @@ from backend.graph.entrypoint import astream_chat
 from evals.run_all import run_all
 
 app = typer.Typer(help="Ferret — research paper chat assistant.")
+
+# The Express frontend (package.json) lives in <repo>/frontend; npm must run there.
+_FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 
 class ChatMode(str, enum.Enum):
@@ -69,7 +74,10 @@ def web(
     """Run the Express frontend as a subprocess."""
     _port = port or int(os.environ.get("FRONTEND_PORT", "3000"))
     env = {**os.environ, "PORT": str(_port)}
-    proc = subprocess.Popen(["npm", "start"], env=env)
+    # shutil.which resolves npm -> npm.cmd on Windows; bare "npm" is not directly
+    # executable by subprocess there (WinError 2).
+    npm = shutil.which("npm") or "npm"
+    proc = subprocess.Popen([npm, "start"], env=env, cwd=_FRONTEND_DIR)
     try:
         returncode = proc.wait()
     except KeyboardInterrupt:
@@ -108,9 +116,11 @@ def dev() -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
+    npm = shutil.which("npm") or "npm"
     frontend_proc = subprocess.Popen(
-        ["npm", "start"],
+        [npm, "start"],
         env={**os.environ, "PORT": frontend_port},
+        cwd=_FRONTEND_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

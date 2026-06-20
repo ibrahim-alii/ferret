@@ -39,7 +39,7 @@ class Paper(Base):
     published_date: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     ingestion_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending"
-    )  # "pending" | "abstract_only" | "full"
+    )  # "pending" | "abstract_only" | "full" | "failed"
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )
@@ -134,6 +134,7 @@ class CitedPaper(Base):
     )
     arxiv_id: Mapped[str] = mapped_column(String)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    abstract_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[Session] = relationship(
         "Session", back_populates="cited_papers"

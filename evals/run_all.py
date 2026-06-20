@@ -54,7 +54,7 @@ async def run_all(paper_id: str, mode: str | None = "ask") -> dict[str, Any]:
     # dense-retrieval measurement. For a fair dense comparison, replace dummy_dense with real
     # Voyage embeddings per query.
     eval_queries = list(qrels_dict.keys())[:5]
-    embed_dim = int(os.environ.get("VOYAGE_EMBED_DIM", "1024"))
+    embed_dim = int(os.environ.get("OPENAI_EMBED_DIM", "1536"))
     dummy_dense = [0.0] * embed_dim
 
     async with tracker.track_stage("retrieval"):

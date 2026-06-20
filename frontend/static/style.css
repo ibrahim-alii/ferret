@@ -30,6 +30,77 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+body { display: flex; }
+
+/* ── History sidebar ── */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  height: 100vh;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 1.5rem 0.75rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.5rem 0.75rem;
+}
+
+.sidebar-title {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.session-list { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+
+.session-item {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.session-item:hover { background: var(--bg-input); border-color: var(--border); }
+.session-item.active { border-color: var(--amber-dim); background: rgba(232, 160, 48, 0.07); }
+
+.session-item-title {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item-mode {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.session-empty {
+  padding: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+@media (max-width: 720px) { .sidebar { display: none; } }
+
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   padding: 0; margin: -1px; overflow: hidden;
@@ -37,6 +108,8 @@ html, body {
 }
 
 #app {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -219,6 +292,56 @@ html, body {
 }
 
 .msg-error { border-color: var(--red) !important; color: var(--red) !important; }
+
+/* ── Thinking panel (Claude-style live status) ── */
+.thinking-panel {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 0.2rem 0;
+}
+
+.thinking-current {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.thinking-summary { cursor: pointer; }
+
+.thinking-spinner {
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 2px solid var(--amber-dim);
+  border-top-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: thinking-spin 0.7s linear infinite;
+}
+
+@keyframes thinking-spin {
+  to { transform: rotate(360deg); }
+}
+
+.thinking-collapsed .thinking-label::after {
+  content: ' ▾';
+  opacity: 0.6;
+}
+
+.thinking-trail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.3rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+
+.thinking-step {
+  font-style: italic;
+  opacity: 0.7;
+}
 
 /* ── Citations ── */
 .citations {

@@ -6,7 +6,7 @@ Project conventions for Claude Code working in this repo. See `PRD.md` for full 
 
 ## Project Summary
 
-ArXiv RAG chatbot with two modes: Deep Dive (single-paper, strict grounding) and Ask (cross-corpus, grows over time). LangGraph-based CRAG flow, Qdrant Cloud hybrid retrieval, Voyage AI embeddings/rerank, Groq LLMs, FastAPI + SSE backend, Express + vanilla JS frontend, SQLite for state.
+ArXiv RAG chatbot with two modes: Deep Dive (single-paper, strict grounding) and Ask (cross-corpus, grows over time). LangGraph-based CRAG flow, Qdrant Cloud hybrid retrieval, OpenAI embeddings + Voyage AI rerank, Groq LLMs, FastAPI + SSE backend, Express + vanilla JS frontend, SQLite for state.
 
 ## Repo Structure
 
@@ -46,18 +46,18 @@ Model routing is via `GRADING_MODEL` and `GENERATION_MODEL` env vars, not hardco
 ## Code Conventions
 
 - Python: async/await throughout the backend (FastAPI, ingestion, graph nodes). Use `asyncio.gather` for concurrent I/O (concurrent arxiv fetches, the metadata+download pair, the parallel arxiv searches in Ask's corrective branch) per PRD Sections 5-6.
-- Bounded concurrency for rate-limited providers: wrap Voyage and Groq calls in an `asyncio.Semaphore` (`VOYAGE_MAX_CONCURRENCY`) plus retry-with-backoff. The free tiers are RPM-limited, so prefer a few large embedding batches over many small parallel ones. Async is for not blocking the event loop and overlapping independent calls, not for hammering a rate-limited API.
+- Bounded concurrency for rate-limited providers: wrap OpenAI embedding (`OPENAI_MAX_CONCURRENCY`), Voyage rerank (`VOYAGE_MAX_CONCURRENCY`), and Groq calls in an `asyncio.Semaphore` plus retry-with-backoff. Free tiers are RPM-limited, so prefer a few large embedding batches over many small parallel ones. Async is for not blocking the event loop and overlapping independent calls, not for hammering a rate-limited API.
 - Retrieval uses Qdrant's server-side RRF fusion (Universal Query API `prefetch`), not a client-side fusion function. Sparse (BM25) generation lives only in module 2, for both upsert and query.
 - Only child chunks are embedded and stored in Qdrant. Parent sections live in SQLite and are expanded into the generation context (small-to-big).
-- No local models, no GPU code paths. All embedding/reranking/generation calls go to hosted APIs (Voyage, Groq).
+- No local models, no GPU code paths. All embedding/reranking/generation calls go to hosted APIs (OpenAI embeddings, Voyage rerank, Groq). Embeddings have an OpenAI/Gemini toggle (`USE_LOCAL_EMBEDDINGS`) for local/dev testing; both providers share one dim (`OPENAI_EMBED_DIM`) and are centralized in `backend/ingestion/embedder.py` (`embed_chunks` for documents, `embed_query` for queries).
 - SQLAlchemy (async, over aiosqlite) for SQLite access, to keep a Postgres migration path open.
 - Table write ownership is a hard contract: `papers`/`chunks` -> module 1; `sessions`/`messages`/`cited_papers` -> module 4; module 3 reads chunk text read-only and writes nothing. Never add a second writer to a table in another worktree.
 - Type hints required on all function signatures.
-- Use Context7 MCP for up-to-date library docs (LangGraph, Qdrant client, FastAPI, Voyage SDK) instead of relying on memorized API shapes.
+- Use Context7 MCP for up-to-date library docs (LangGraph, Qdrant client, FastAPI, OpenAI SDK, Voyage SDK) instead of relying on memorized API shapes.
 
 ## Testing
 
-- pytest for all backend modules. Unit tests mock external APIs (Groq, Voyage, Qdrant, arxiv); integration tests (marked `@pytest.mark.integration`) hit real endpoints and are skipped by default; eval tests (marked `@pytest.mark.eval`) run the full RAG evaluation suite against a real ingested paper and are also skipped by default.
+- pytest for all backend modules. Unit tests mock external APIs (Groq, OpenAI, Voyage, Qdrant, arxiv); integration tests (marked `@pytest.mark.integration`) hit real endpoints and are skipped by default; eval tests (marked `@pytest.mark.eval`) run the full RAG evaluation suite against a real ingested paper and are also skipped by default.
 - TDD workflow expected: write/adjust tests alongside implementation, not after.
 - Eval suite: `pytest -m eval` or `python evals/run_all.py --paper-id <id>` (or `ferret eval --paper-id <id>`). Produces retrieval (ranx), grading accuracy, and generation (RAGAS) reports under `evals/reports/`.
 

@@ -23,6 +23,7 @@ from backend.api.schemas import (
     PostMessageRequest,
     PostSessionRequest,
     PostSessionResponse,
+    SessionSummary,
 )
 from backend.db.models import CitedPaper, Message, Paper, Session
 from backend.db.session import get_session
@@ -30,6 +31,50 @@ from backend.graph.entrypoint import astream_chat
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
+
+
+def _session_title(first_user_message: str | None, session: Session) -> str:
+    """Derive a sidebar label: first user message snippet, else mode/paper fallback."""
+    if first_user_message:
+        snippet = first_user_message.strip().replace("\n", " ")
+        return snippet[:60] + ("…" if len(snippet) > 60 else "")
+    if session.mode == "deep_dive" and session.paper_id:
+        return f"Deep Dive · {session.paper_id}"
+    return "New chat"
+
+
+@router.get("", response_model=list[SessionSummary])
+async def list_sessions(
+    db: AsyncSession = Depends(get_session),
+) -> list[SessionSummary]:
+    """Recent sessions for the history sidebar, newest first."""
+    result = await db.execute(
+        select(Session).order_by(Session.created_at.desc()).limit(50)
+    )
+    sessions = result.scalars().all()
+    if not sessions:
+        return []
+
+    session_ids = [s.session_id for s in sessions]
+    msg_result = await db.execute(
+        select(Message)
+        .where(Message.session_id.in_(session_ids), Message.role == "user")
+        .order_by(Message.created_at)
+    )
+    first_user: dict[str, str] = {}
+    for m in msg_result.scalars().all():
+        first_user.setdefault(m.session_id, m.content)
+
+    return [
+        SessionSummary(
+            session_id=s.session_id,
+            mode=s.mode,
+            paper_id=s.paper_id,
+            created_at=s.created_at,
+            title=_session_title(first_user.get(s.session_id), s),
+        )
+        for s in sessions
+    ]
 
 
 @router.post("", status_code=201, response_model=PostSessionResponse)
@@ -114,7 +159,7 @@ async def _stream(
     Message row is committed so message_id is never NULL on CitedPaper rows.
     """
     token_parts: list[str] = []
-    buffered_citations: list[dict] = []  # [{arxiv_id, title}, ...]
+    buffered_citations: list[dict] = []  # [{arxiv_id, title, abstract_snippet}, ...]
 
     try:
         async for event in astream_chat(
@@ -129,17 +174,23 @@ async def _stream(
                 token_parts.append(event.get("content", ""))
                 yield _sse("token", {"content": event.get("content", "")})
 
+            elif event_type == "status":
+                yield _sse(
+                    "status",
+                    {"step": event.get("step", ""), "content": event.get("content", "")},
+                )
+
             elif event_type == "interim_message":
                 yield _sse("interim_message", {"content": event.get("content", "")})
 
             elif event_type == "citation":
-                buffered_citations.append(
-                    {"arxiv_id": event.get("arxiv_id", ""), "title": event.get("title")}
-                )
-                yield _sse(
-                    "citation",
-                    {"arxiv_id": event.get("arxiv_id", ""), "title": event.get("title")},
-                )
+                citation = {
+                    "arxiv_id": event.get("arxiv_id", ""),
+                    "title": event.get("title"),
+                    "abstract_snippet": event.get("abstract_snippet"),
+                }
+                buffered_citations.append(citation)
+                yield _sse("citation", citation)
 
             elif event_type == "done":
                 final_content = event.get("content", "".join(token_parts))
@@ -159,6 +210,7 @@ async def _stream(
                             message_id=assistant_msg.message_id,
                             arxiv_id=citation["arxiv_id"],
                             title=citation["title"],
+                            abstract_snippet=citation["abstract_snippet"],
                         )
                     )
 
