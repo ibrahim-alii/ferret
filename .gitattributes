@@ -1,5 +1,0 @@
-# Files consumed by Linux containers must stay LF even when checked out on
-# Windows — a CRLF Dockerfile breaks the CMD line-continuation on build.
-Dockerfile  text eol=lf
-*.toml      text eol=lf
-*.sh        text eol=lf
