@@ -13,9 +13,11 @@ export function createApp() {
   // Dynamic config: injects BACKEND_HOST/BACKEND_PORT as window.__BACKEND_URL__
   // Module 4 FastAPI is expected to allow CORS from this frontend's origin.
   app.get('/config.js', (req, res) => {
+    // In production set BACKEND_URL to the full public backend origin
+    // (e.g. https://ferret-api.fly.dev). Falls back to host:port for local dev.
     const host = process.env.BACKEND_HOST || 'localhost';
     const port = process.env.BACKEND_PORT || '8000';
-    const backendUrl = `http://${host}:${port}`;
+    const backendUrl = process.env.BACKEND_URL || `http://${host}:${port}`;
     res.type('application/javascript');
     res.send(`window.__BACKEND_URL__ = ${JSON.stringify(backendUrl)};`);
   });

@@ -1,0 +1,46 @@
+# Fly.io config for the Ferret FastAPI backend.
+# Deploy from the REPO ROOT (build context needs pyproject.toml + backend/ + evals/):
+#   fly deploy --config backend/fly.toml
+# App names are globally unique on Fly — rename "ferret-api" if it's taken.
+app = "ferret-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  BACKEND_HOST = "0.0.0.0"
+  BACKEND_PORT = "8000"
+  # SQLite lives on the mounted volume so it survives deploys/restarts.
+  SQLITE_DB_PATH = "/data/app.db"
+  QDRANT_COLLECTION_NAME = "arxiv_chunks"
+  GRADING_MODEL = "llama-3.1-8b-instant"
+  GENERATION_MODEL = "llama-3.3-70b-versatile"
+  OPENAI_EMBED_MODEL = "text-embedding-3-small"
+  OPENAI_EMBED_DIM = "1536"
+  JINA_RERANK_MODEL = "jina-reranker-v2-base-multilingual"
+  SPARSE_MODEL = "Qdrant/bm25"
+  # Comma-separated allowed CORS origins — set to your deployed frontend URL.
+  FRONTEND_ORIGIN = "https://ferret-web.fly.dev"
+  # arxiv API etiquette: replace with a real contact address before launch.
+  ARXIV_USER_AGENT = "ferret-rag/0.1 (contact: you@example.com)"
+
+# Persistent disk for SQLite. Create once:
+#   fly volumes create ferret_data --region iad --size 1 --config backend/fly.toml
+[[mounts]]
+  source = "ferret_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Keep one machine warm: a volume binds the app to a single machine, and cold
+  # starts also re-download the fastembed BM25 model. Set to 0 to allow scale-to-zero.
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # fastembed/onnxruntime (BM25 sparse vectors) needs headroom; 256MB OOMs.
+  memory = "1gb"
