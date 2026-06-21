@@ -19,6 +19,15 @@ _CHITCHAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Demonstrative references to a specific-but-unnamed paper set. In Ask mode there is no
+# fixed "these papers" in view (the corpus grows arbitrarily), so such a reference means
+# the user is presuming a single/known-set context that only Deep Dive provides. Matched
+# ask-mode-only and routed to clarify, which nudges the user toward Deep Dive.
+_UNNAMED_PAPER_REF_RE = re.compile(
+    r"\b(this|these|those|the\s+above|the\s+aforementioned)\s+papers?\b",
+    re.IGNORECASE,
+)
+
 
 async def classify_node(state: dict) -> dict:
     """Route a turn to one of four intents: chat, clarify, general, or research.
@@ -35,6 +44,15 @@ async def classify_node(state: dict) -> dict:
         return {"intent": "chat"}
 
     mode = state.get("mode", "ask")
+
+    # Ask-mode-only guard: a demonstrative reference to an unnamed paper set has no
+    # referent here (the corpus isn't a fixed set the user is looking at), so ask one
+    # clarifying question instead of searching the whole corpus. Deterministic, so it
+    # skips the LLM call entirely.
+    if mode != "deep_dive" and _UNNAMED_PAPER_REF_RE.search(message):
+        emit({"type": "status", "step": "clarifying", "content": "Clarifying…"})
+        return {"intent": "clarify"}
+
     model = os.environ.get("GRADING_MODEL", "llama-3.1-8b-instant")
     if mode == "deep_dive":
         system_prompt = (
@@ -49,12 +67,14 @@ async def classify_node(state: dict) -> dict:
             "CHAT = greetings, small talk, thanks, or meta questions about the assistant. "
             "CLARIFY = the request is too vague, ambiguous, or underspecified to search or "
             "answer well (e.g. 'tell me about the recent papers' with no topic, 'help me', "
-            "'what's interesting'). "
+            "'what's interesting'), OR it refers to a specific but unnamed set of papers the "
+            "user seems to be looking at ('these papers', 'this paper') without naming a "
+            "topic or arXiv id. "
             "GENERAL = a general-knowledge or conceptual question not tied to retrieving specific "
             "papers (e.g. 'what is backpropagation?', 'explain attention'). "
-            "RESEARCH = anything that benefits from looking at specific arXiv papers: content "
-            "questions about ingested papers, recent or latest papers on a named topic, "
-            "comparisons, or summaries of an area. "
+            "RESEARCH = anything that benefits from searching arXiv for specific papers: content "
+            "questions about recent or latest papers on a named topic, comparisons, or "
+            "summaries of a named area. "
             "Reply with exactly one word: CHAT, CLARIFY, GENERAL, or RESEARCH."
         )
     try:

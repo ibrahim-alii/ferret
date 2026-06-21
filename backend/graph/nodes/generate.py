@@ -122,7 +122,10 @@ def _build_messages(
             "what they actually want. Do NOT attempt to answer the question. Instead, ask "
             "ONE short, friendly clarifying question to pin down what they're after — for "
             "example the specific topic, subfield, or a particular paper. Keep it to a "
-            "single question."
+            "single question. If the user seems to be asking about one specific paper they "
+            "have in mind, briefly suggest they switch to Deep Dive mode and paste that "
+            "paper's arXiv id, since Ask mode searches across the whole corpus rather than a "
+            "single fixed paper."
         )
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         messages.extend(_trim_history(chat_history, history_budget))

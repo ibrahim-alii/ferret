@@ -1314,6 +1314,66 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_astream_chat_ask_demonstrative_clarifies_without_retrieval(monkeypatch):
+    """An Ask-mode 'these papers' probe must clarify, not retrieve.
+
+    The deterministic guard in classify_node routes straight to the clarify reply, so
+    the stream should carry a 'clarifying' status step and emit no citations (no
+    retrieval happened). hybrid_search is wired to explode to prove it's never called.
+    """
+    monkeypatch.setenv("GENERATION_MODEL", "llama-3.3-70b-versatile")
+    monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
+
+    tokens = ["Which", " topic", "?"]
+
+    async def fake_stream(**kwargs):
+        class FakeStream:
+            def __init__(self):
+                self._tokens = list(tokens)
+                self._idx = 0
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                if self._idx < len(self._tokens):
+                    c = MagicMock()
+                    c.choices = [MagicMock()]
+                    c.choices[0].delta = MagicMock()
+                    c.choices[0].delta.content = self._tokens[self._idx]
+                    self._idx += 1
+                    return c
+                raise StopAsyncIteration
+        return FakeStream()
+
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(side_effect=fake_stream)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    mock_groq_instance = MagicMock()
+    mock_groq_instance.chat = mock_chat
+
+    def _boom(*a, **k):
+        raise AssertionError("clarify path must not retrieve")
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
+         patch("backend.graph.nodes.retrieve.hybrid_search", AsyncMock(side_effect=_boom)):
+        from backend.graph.entrypoint import astream_chat
+        events = []
+        async for event in astream_chat(
+            mode="ask",
+            paper_id=None,
+            user_message="what problem do these papers address and what methods do they use?",
+            chat_history=[],
+        ):
+            events.append(event)
+
+    steps = [e.get("step") for e in events if e.get("type") == "status"]
+    assert "clarifying" in steps
+    assert "retrieving" not in steps
+    assert not any(e.get("type") == "citation" for e in events)
+    assert "token" in [e.get("type") for e in events]
+
+
+@pytest.mark.asyncio
 async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     """astream_chat should be read-only; only expand_node reads from SQLite, never writes."""
     monkeypatch.setenv("GENERATION_MODEL", "llama-3.3-70b-versatile")

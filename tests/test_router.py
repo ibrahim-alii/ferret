@@ -96,3 +96,77 @@ def test_route_after_classify_maps_all_intents():
     assert route_after_classify({"intent": "chat"}) == "chat"
     assert route_after_classify({"intent": "research"}) == "retrieve"
     assert route_after_classify({}) == "retrieve"
+
+
+# --- Mode-confusion catalog ---------------------------------------------------
+# A demonstrative reference to an unnamed paper set ("these papers", "this paper")
+# has no referent in Ask mode (the corpus is not a fixed set the user is looking
+# at), so it must route to clarify *without* an LLM call. In Deep Dive the same
+# phrasing is a legitimate single-paper research question and the guard must not
+# fire.
+
+_DEMONSTRATIVE_ASK_PROBES = [
+    "what problem do these papers address and what methods do they use?",
+    "summarize this paper's contributions",
+    "what do those papers conclude?",
+    "give me the key results from the above papers",
+    "how do these papers compare?",
+]
+
+
+@pytest.mark.parametrize("message", _DEMONSTRATIVE_ASK_PROBES)
+@pytest.mark.asyncio
+async def test_classify_demonstrative_ask_clarifies_without_llm(monkeypatch, message):
+    import backend.graph.nodes.classify as classify_mod
+
+    called = False
+
+    async def _fail(*a, **k):
+        nonlocal called
+        called = True
+        raise AssertionError("demonstrative ask probe must not call the LLM")
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _fail)
+    result = await classify_mod.classify_node({"user_message": message, "mode": "ask"})
+    assert result == {"intent": "clarify"}
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what does this paper conclude?",
+        "what methods do these papers use?",
+    ],
+)
+@pytest.mark.asyncio
+async def test_classify_demonstrative_deep_dive_stays_research(monkeypatch, message):
+    import backend.graph.nodes.classify as classify_mod
+
+    async def _research(*a, **k):
+        return "RESEARCH"
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _research)
+    result = await classify_mod.classify_node({"user_message": message, "mode": "deep_dive"})
+    assert result == {"intent": "research"}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "compare diffusion models for image generation",
+        "what are the latest papers on RLHF?",
+        "explain how these models differ",  # "these models", not "these papers"
+    ],
+)
+@pytest.mark.asyncio
+async def test_classify_guard_does_not_over_trigger(monkeypatch, message):
+    """Ask queries without a demonstrative *paper* reference fall through to the LLM."""
+    import backend.graph.nodes.classify as classify_mod
+
+    async def _research(*a, **k):
+        return "RESEARCH"
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _research)
+    result = await classify_mod.classify_node({"user_message": message, "mode": "ask"})
+    assert result == {"intent": "research"}
