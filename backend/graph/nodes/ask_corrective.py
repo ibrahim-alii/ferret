@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -14,12 +15,28 @@ logger = logging.getLogger(__name__)
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_NS = "http://www.w3.org/2005/Atom"
 
+# Detect when the user wants recent work, so we sort arXiv by submission date
+# instead of relevance.
+_RECENCY_RE = re.compile(
+    r"\b("
+    r"recent|recently|latest|newest|this year|up[\s-]?to[\s-]?date|"
+    r"state[\s-]?of[\s-]?the[\s-]?art|sota|2024|2025|2026"
+    r")\b",
+    re.IGNORECASE,
+)
 
-async def _search_arxiv(http_client: httpx.AsyncClient, query: str, max_results: int = 5) -> list[dict]:
-    response = await http_client.get(
-        ARXIV_API_URL,
-        params={"search_query": f"all:{query}", "max_results": max_results},
-    )
+
+async def _search_arxiv(
+    http_client: httpx.AsyncClient,
+    query: str,
+    max_results: int = 5,
+    sort_by_date: bool = False,
+) -> list[dict]:
+    params = {"search_query": f"all:{query}", "max_results": max_results}
+    if sort_by_date:
+        params["sortBy"] = "submittedDate"
+        params["sortOrder"] = "descending"
+    response = await http_client.get(ARXIV_API_URL, params=params)
     response.raise_for_status()
     xml_text = response.text
     papers: list[dict] = []
@@ -49,6 +66,7 @@ async def ask_corrective_node(state: dict) -> dict:
 
     user_message = state.get("user_message", "")
     retry_count = state.get("retry_count", 0)
+    recency = bool(_RECENCY_RE.search(user_message))
 
     emit({"type": "status", "step": "searching_arxiv", "content": "Looking up papers on arXiv…"})
 
@@ -82,7 +100,8 @@ async def ask_corrective_node(state: dict) -> dict:
     all_papers: list[dict] = []
     async with httpx.AsyncClient() as http:
         results = await asyncio.gather(
-            *[_search_arxiv(http, q) for q in queries], return_exceptions=True
+            *[_search_arxiv(http, q, sort_by_date=recency) for q in queries],
+            return_exceptions=True,
         )
     for result in results:
         if isinstance(result, Exception):

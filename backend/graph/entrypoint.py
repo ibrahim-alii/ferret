@@ -25,7 +25,6 @@ async def astream_chat(
         "grade_result": None,
         "arxiv_queries": [],
         "citations": [],
-        "interim_messages": [],
         "retry_count": 0,
     }
     # stream_mode="custom" surfaces each event a node passes to its stream writer

@@ -8,7 +8,7 @@ class GraphState(TypedDict):
     paper_id: str | None
     user_message: str
     chat_history: list[dict[str, Any]]
-    intent: Literal["chat", "research"] | None
+    intent: Literal["chat", "research", "clarify", "general"] | None
     query_vector: list[float] | None
     retrieved_chunks: list[dict[str, Any]]
     reranked_children: list[dict[str, Any]]
@@ -16,5 +16,4 @@ class GraphState(TypedDict):
     grade_result: dict[str, Any] | None
     arxiv_queries: list[str]
     citations: list[dict[str, Any]]
-    interim_messages: list[str]
     retry_count: int

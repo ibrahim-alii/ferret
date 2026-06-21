@@ -106,8 +106,6 @@ def _build_messages(
         messages.append({"role": "user", "content": user_message})
         return messages
 
-    context = _build_context(parent_sections, context_budget)
-
     # Keep markdown emphasis sparse: the model otherwise bolds many ordinary
     # words, which reads as cluttered. Reserve bold for a few genuinely key terms.
     formatting_guidance = (
@@ -115,6 +113,37 @@ def _build_messages(
         "a handful of genuinely important or unfamiliar technical terms, and never "
         "bold more than a few words in the entire response."
     )
+
+    if intent == "clarify":
+        # The request is ambiguous: ask one clarifying question, don't answer yet.
+        system_prompt = (
+            "You are Ferret, a friendly research-assistant chatbot for arXiv papers. "
+            "The user's request is ambiguous or underspecified, so you cannot tell yet "
+            "what they actually want. Do NOT attempt to answer the question. Instead, ask "
+            "ONE short, friendly clarifying question to pin down what they're after — for "
+            "example the specific topic, subfield, or a particular paper. Keep it to a "
+            "single question."
+        )
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        messages.extend(_trim_history(chat_history, history_budget))
+        messages.append({"role": "user", "content": user_message})
+        return messages
+
+    if intent == "general":
+        # General/conceptual question answered from the model's own knowledge.
+        system_prompt = (
+            "You are Ferret, a knowledgeable research assistant. Answer the user's general "
+            "or conceptual question clearly and accurately from your own knowledge. Briefly "
+            "note that this is general background and is not drawn from a specific ingested "
+            "paper, and offer to find or ingest papers on the topic if they'd like sources. "
+            "Never fabricate specific paper titles, authors, or citations. " + formatting_guidance
+        )
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        messages.extend(_trim_history(chat_history, history_budget))
+        messages.append({"role": "user", "content": user_message})
+        return messages
+
+    context = _build_context(parent_sections, context_budget)
 
     if mode == "deep_dive":
         system_prompt = (
@@ -126,9 +155,14 @@ def _build_messages(
     else:
         system_prompt = (
             "You are a research assistant with access to multiple papers. "
-            "Answer the user's question concisely using only the provided context; "
-            "do not add facts from outside knowledge. "
-            "Refer to papers by their title, not the arXiv ID, when referencing information. "
+            "Answer the user's question concisely, using the provided context (retrieved "
+            "paper sections) as your PRIMARY source and grounding your answer in it. "
+            "Cite papers by their title (never the arXiv ID), including the publication year. "
+            "If the context does not fully cover the question, you may supplement with general "
+            "knowledge, but clearly distinguish what comes from the ingested papers versus "
+            "general knowledge, and never fabricate paper titles, authors, or citations. "
+            "If you have neither relevant context nor reliable knowledge, say so and suggest "
+            "ingesting papers on the topic. "
             "Each source is labeled with its publication year; use it to distinguish older "
             "from more recent work and do not present an older paper as a recent advance. "
             "When the sources cover different approaches or come from different eras, "
@@ -246,8 +280,9 @@ async def generate_node(state: dict) -> dict:
                 continue
             raise
 
-    # Grounded answers cite their source papers; conversational turns have none.
-    if intent != "chat":
+    # Only the grounded research path cites source papers; chat/clarify/general
+    # produce no retrieved context and therefore no citations.
+    if intent == "research":
         await _emit_citations(parent_sections)
 
     emit({"type": "done"})

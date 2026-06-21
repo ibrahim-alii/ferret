@@ -2,7 +2,14 @@ import os
 
 
 def route_after_classify(state: dict) -> str:
-    return "chat" if state.get("intent") == "chat" else "retrieve"
+    intent = state.get("intent")
+    if intent == "chat":
+        return "chat"
+    if intent == "clarify":
+        return "clarify"
+    if intent == "general":
+        return "general"
+    return "retrieve"
 
 
 def route_after_grade(state: dict) -> str:

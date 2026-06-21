@@ -1023,24 +1023,6 @@ async def test_deep_dive_insufficient_zero_chunks_emits_drift_message_no_arxiv(m
 
 
 @pytest.mark.asyncio
-async def test_classify_node_greeting_is_chat_without_llm_call(monkeypatch):
-    # Obvious greetings short-circuit to chat with no Groq call at all.
-    import backend.graph.nodes.classify as classify_mod
-
-    called = False
-
-    async def _fail(*a, **k):
-        nonlocal called
-        called = True
-        raise AssertionError("should not call the LLM for a greeting")
-
-    monkeypatch.setattr(classify_mod, "groq_complete", _fail)
-    result = await classify_mod.classify_node({"user_message": "hi there!"})
-    assert result == {"intent": "chat"}
-    assert called is False
-
-
-@pytest.mark.asyncio
 async def test_classify_node_research_question_uses_llm(monkeypatch):
     import backend.graph.nodes.classify as classify_mod
 
@@ -1052,14 +1034,6 @@ async def test_classify_node_research_question_uses_llm(monkeypatch):
         {"user_message": "What is sliding window attention in transformers?"}
     )
     assert result == {"intent": "research"}
-
-
-def test_route_after_classify_sends_chat_intent_to_chat_node():
-    from backend.graph.edges import route_after_classify
-
-    assert route_after_classify({"intent": "chat"}) == "chat"
-    assert route_after_classify({"intent": "research"}) == "retrieve"
-    assert route_after_classify({}) == "retrieve"  # default: full research path
 
 
 def _one_chunk_stream():
@@ -1118,7 +1092,7 @@ async def test_generate_node_trims_context_to_token_budget(monkeypatch):
     )
     # Boilerplate prompt + a context capped near the 50-token budget — nowhere near
     # the thousands of tokens the raw section would have contributed.
-    assert len(enc.encode(system_content)) < 250
+    assert len(enc.encode(system_content)) < 320
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,8 @@ def build_graph():
     builder.add_node("expand", expand_node)
     builder.add_node("grade", grade_node)
     builder.add_node("chat", generate_node)
+    builder.add_node("clarify", generate_node)
+    builder.add_node("general", generate_node)
     builder.add_node("generate_deep_dive", generate_node)
     builder.add_node("generate_ask", generate_node)
     builder.add_node("deep_dive_insufficient", deep_dive_insufficient_node)
@@ -30,9 +32,11 @@ def build_graph():
     builder.add_conditional_edges(
         "classify",
         route_after_classify,
-        {"chat": "chat", "retrieve": "retrieve"},
+        {"chat": "chat", "clarify": "clarify", "general": "general", "retrieve": "retrieve"},
     )
     builder.add_edge("chat", END)
+    builder.add_edge("clarify", END)
+    builder.add_edge("general", END)
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "expand")
     builder.add_edge("expand", "grade")
