@@ -195,7 +195,10 @@ describe('loadSessions (exported helper)', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => list });
     const result = await loadSessions();
     expect(result).toEqual(list);
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/sessions'));
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-Client-ID': expect.any(String) }) })
+    );
   });
 
   it('returns [] on error response', async () => {
@@ -354,7 +357,8 @@ describe('loadSessionHistory (exported helper)', () => {
     await loadSessionHistory('sess-abc', (msg) => received.push(msg));
 
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/sessions/sess-abc/messages')
+      expect.stringContaining('/sessions/sess-abc/messages'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-Client-ID': expect.any(String) }) })
     );
     expect(received).toHaveLength(2);
     expect(received[0]).toEqual({ role: 'user', content: 'Hello' });

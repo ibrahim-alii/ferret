@@ -78,6 +78,11 @@ class Session(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    # Anonymous per-browser owner (X-Client-ID header). Nullable for backward
+    # compatibility with legacy rows. NOTE: create_all does not ALTER existing
+    # tables — existing local SQLite DBs need this column added manually or the
+    # DB recreated.
+    client_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     mode: Mapped[str] = mapped_column(String)
     paper_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("papers.arxiv_id"), nullable=True

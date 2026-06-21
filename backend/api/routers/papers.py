@@ -1,9 +1,10 @@
 """POST /papers and GET /papers/{arxiv_id} endpoints."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api.limiter import limiter
 from backend.api.schemas import PaperStatusResponse, PostPaperRequest
 from backend.db.models import Paper
 from backend.db.session import get_session
@@ -18,7 +19,9 @@ async def _get_paper_by_arxiv_id(db: AsyncSession, arxiv_id: str) -> Paper | Non
 
 
 @router.post("", status_code=202, response_model=PaperStatusResponse)
+@limiter.limit("10/minute")
 async def post_paper(
+    request: Request,
     body: PostPaperRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),

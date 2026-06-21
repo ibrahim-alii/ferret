@@ -171,7 +171,7 @@ function renderInline(text) {
   return text
     .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+      (_, label, url) => `<a href="${encodeURI(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`)
     .replace(/\*\*([^*]+)\*\*/g, (_, b) => `<strong>${b}</strong>`)
     .replace(/(^|[^*])\*([^*]+)\*/g, (_, pre, i) => `${pre}<em>${i}</em>`);
 }
@@ -289,6 +289,43 @@ export class AppState {
   setIngestionStatus(status) { this.ingestionStatus = status; }
 }
 
+// ─── Anonymous client identity ────────────────────────────────────────────────
+
+const CLIENT_ID_KEY = 'ferret_client_id';
+let transientClientId = null;
+
+/**
+ * Stable anonymous per-browser id, persisted in localStorage. Generated once on
+ * first call and reused thereafter. Falls back to a transient (in-memory) id when
+ * localStorage/crypto are unavailable (tests/SSR) so callers never crash.
+ * Exported for testing.
+ */
+export function getClientId() {
+  try {
+    const stored = localStorage.getItem(CLIENT_ID_KEY);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem(CLIENT_ID_KEY, id);
+    return id;
+  } catch {
+    if (!transientClientId) {
+      transientClientId =
+        (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `transient-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+    return transientClientId;
+  }
+}
+
+/**
+ * Standard request headers including the anonymous client id, merged with any
+ * extras (e.g. Content-Type). Exported for testing.
+ */
+export function authHeaders(extra = {}) {
+  return { 'X-Client-ID': getClientId(), ...extra };
+}
+
 // ─── SSE stream consumer ──────────────────────────────────────────────────────
 
 /**
@@ -303,7 +340,7 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -374,7 +411,7 @@ export async function submitArxivId(arxivId, { onStatus, onPollStart } = {}) {
   onStatus && onStatus('Submitting…');
   const res = await fetch(`${BACKEND}/papers`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ arxiv_id: arxivId }),
   });
   if (!res.ok) throw new Error(`POST /papers → ${res.status}`);
@@ -389,7 +426,7 @@ export async function submitArxivId(arxivId, { onStatus, onPollStart } = {}) {
  * Exported for testing.
  */
 export async function checkIngestionStatus(arxivId) {
-  const res = await fetch(`${BACKEND}/papers/${arxivId}`);
+  const res = await fetch(`${BACKEND}/papers/${arxivId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`GET /papers/${arxivId} → ${res.status}`);
   const paper = await res.json();
   const status = paper.ingestion_status;
@@ -405,7 +442,7 @@ export async function checkIngestionStatus(arxivId) {
  */
 export async function loadSessionHistory(sessionId, onMessage) {
   try {
-    const res = await fetch(`${BACKEND}/sessions/${sessionId}/messages`);
+    const res = await fetch(`${BACKEND}/sessions/${sessionId}/messages`, { headers: authHeaders() });
     if (!res.ok) return;
     const messages = await res.json();
     for (const msg of messages) {
@@ -422,7 +459,7 @@ export async function loadSessionHistory(sessionId, onMessage) {
  */
 export async function loadSessions() {
   try {
-    const res = await fetch(`${BACKEND}/sessions`);
+    const res = await fetch(`${BACKEND}/sessions`, { headers: authHeaders() });
     if (!res.ok) return [];
     return await res.json();
   } catch {
@@ -433,7 +470,7 @@ export async function loadSessions() {
 async function apiPost(path, body) {
   const res = await fetch(`${BACKEND}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);

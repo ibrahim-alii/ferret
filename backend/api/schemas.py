@@ -8,7 +8,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-_ARXIV_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
+# New-style (post-2007) e.g. 2301.00001 / 2301.00001v2 and old-style
+# e.g. hep-th/9901001 / math.AG/0309001v2.
+_ARXIV_NEW_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
+_ARXIV_OLD_RE = re.compile(r"^[a-z\-]+(\.[A-Z]{2})?/\d{7}(v\d+)?$")
 
 
 # ---------------------------------------------------------------------------
@@ -23,8 +26,10 @@ class PostPaperRequest(BaseModel):
     @classmethod
     def arxiv_id_valid(cls, v: str) -> str:
         v = v.strip()
-        if not _ARXIV_RE.match(v):
-            raise ValueError("Invalid arXiv ID format, expected e.g. 2301.00001")
+        if not (_ARXIV_NEW_RE.match(v) or _ARXIV_OLD_RE.match(v)):
+            raise ValueError(
+                "Invalid arXiv ID format, expected e.g. 2301.00001 or hep-th/9901001"
+            )
         return v
 
 

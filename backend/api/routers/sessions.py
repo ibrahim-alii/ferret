@@ -14,11 +14,12 @@ import logging
 import os
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api.limiter import limiter
 from backend.api.schemas import (
     MessageResponse,
     PostMessageRequest,
@@ -79,10 +80,16 @@ async def _generate_session_title(user_message: str, assistant_answer: str) -> s
 @router.get("", response_model=list[SessionSummary])
 async def list_sessions(
     db: AsyncSession = Depends(get_session),
+    x_client_id: str | None = Header(default=None),
 ) -> list[SessionSummary]:
-    """Recent sessions for the history sidebar, newest first."""
+    """Recent sessions for the history sidebar, newest first, scoped to client."""
+    if x_client_id is None:
+        return []
     result = await db.execute(
-        select(Session).order_by(Session.created_at.desc()).limit(50)
+        select(Session)
+        .where(Session.client_id == x_client_id)
+        .order_by(Session.created_at.desc())
+        .limit(50)
     )
     sessions = result.scalars().all()
     if not sessions:
@@ -114,6 +121,7 @@ async def list_sessions(
 async def post_session(
     body: PostSessionRequest,
     db: AsyncSession = Depends(get_session),
+    x_client_id: str | None = Header(default=None),
 ) -> PostSessionResponse:
     if body.mode == "deep_dive":
         result = await db.execute(select(Paper).where(Paper.arxiv_id == body.paper_id))
@@ -123,7 +131,7 @@ async def post_session(
                 status_code=400, detail="Paper not ingested or not ready for a Deep Dive session"
             )
 
-    session = Session(mode=body.mode, paper_id=body.paper_id)
+    session = Session(mode=body.mode, paper_id=body.paper_id, client_id=x_client_id)
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -135,13 +143,19 @@ async def post_session(
     responses={404: {"description": "Session not found"}},
     response_class=StreamingResponse,
 )
+@limiter.limit("30/minute")
 async def post_message(
+    request: Request,
     session_id: str,
     body: PostMessageRequest,
     db: AsyncSession = Depends(get_session),
+    x_client_id: str | None = Header(default=None),
 ) -> StreamingResponse:
     session = await db.get(Session, session_id)
     if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Lenient ownership: legacy rows (client_id is None) stay accessible.
+    if session.client_id is not None and session.client_id != x_client_id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Persist user message before streaming begins.
@@ -286,9 +300,13 @@ def _sse(event: str, data: dict) -> str:
 async def get_messages(
     session_id: str,
     db: AsyncSession = Depends(get_session),
+    x_client_id: str | None = Header(default=None),
 ) -> list[MessageResponse]:
     session = await db.get(Session, session_id)
     if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Lenient ownership: legacy rows (client_id is None) stay accessible.
+    if session.client_id is not None and session.client_id != x_client_id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     result = await db.execute(

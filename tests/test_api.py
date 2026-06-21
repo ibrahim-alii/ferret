@@ -201,7 +201,8 @@ async def test_get_sessions_empty_when_none(client):
 @pytest.mark.asyncio
 async def test_get_sessions_falls_back_to_first_message_snippet_when_no_ai_title(client):
     # _mock_title_gen returns None by default → sidebar uses the first-message snippet.
-    resp = await client.post("/sessions", json={"mode": "ask"})
+    headers = {"X-Client-ID": "client-1"}
+    resp = await client.post("/sessions", json={"mode": "ask"}, headers=headers)
     sid = resp.json()["session_id"]
 
     with patch(
@@ -209,12 +210,13 @@ async def test_get_sessions_falls_back_to_first_message_snippet_when_no_ai_title
         side_effect=_fake_astream_chat,
     ):
         async with client.stream(
-            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"}
+            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"},
+            headers=headers,
         ) as r:
             async for _ in r.aiter_bytes():
                 pass
 
-    resp = await client.get("/sessions")
+    resp = await client.get("/sessions", headers=headers)
     assert resp.status_code == 200
     sessions = resp.json()
     assert len(sessions) == 1
@@ -227,7 +229,8 @@ async def test_get_sessions_falls_back_to_first_message_snippet_when_no_ai_title
 async def test_get_sessions_uses_ai_generated_title_on_first_turn(client, _mock_title_gen):
     _mock_title_gen.return_value = "Machine Learning Basics"
 
-    resp = await client.post("/sessions", json={"mode": "ask"})
+    headers = {"X-Client-ID": "client-1"}
+    resp = await client.post("/sessions", json={"mode": "ask"}, headers=headers)
     sid = resp.json()["session_id"]
 
     with patch(
@@ -235,12 +238,13 @@ async def test_get_sessions_uses_ai_generated_title_on_first_turn(client, _mock_
         side_effect=_fake_astream_chat,
     ):
         async with client.stream(
-            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"}
+            "POST", f"/sessions/{sid}/messages", json={"content": "What is ML?"},
+            headers=headers,
         ) as r:
             async for _ in r.aiter_bytes():
                 pass
 
-    resp = await client.get("/sessions")
+    resp = await client.get("/sessions", headers=headers)
     sessions = resp.json()
     assert sessions[0]["title"] == "Machine Learning Basics"
     _mock_title_gen.assert_awaited_once()
@@ -248,12 +252,13 @@ async def test_get_sessions_uses_ai_generated_title_on_first_turn(client, _mock_
 
 @pytest.mark.asyncio
 async def test_get_sessions_uses_fallback_title_without_messages(client):
+    headers = {"X-Client-ID": "client-1"}
     resp = await client.post(
-        "/sessions", json={"mode": "ask"}
+        "/sessions", json={"mode": "ask"}, headers=headers
     )
     assert resp.status_code == 201
 
-    resp = await client.get("/sessions")
+    resp = await client.get("/sessions", headers=headers)
     sessions = resp.json()
     assert len(sessions) == 1
     assert sessions[0]["title"] == "New chat"
