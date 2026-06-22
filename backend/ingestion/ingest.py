@@ -90,7 +90,13 @@ async def _run_ingestion(arxiv_id: str, force: bool = False) -> PaperRecord:
         authors = meta["authors"]
         published_date = meta["published_date"]
 
-        raw_sections = parse(html_content=html_content, pdf_bytes=pdf_bytes)
+        # parse() runs BeautifulSoup/lxml and PyMuPDF, which are CPU-bound and
+        # blocking. Ingestion runs as a FastAPI BackgroundTask in the web event loop,
+        # so parsing inline would stall every concurrent SSE chat stream on this worker
+        # for the duration. Offload it to a thread.
+        raw_sections = await asyncio.to_thread(
+            parse, html_content=html_content, pdf_bytes=pdf_bytes
+        )
         filtered_sections = filter_sections(raw_sections)
         parents, children = chunk_sections(
             paper_id=0,  # placeholder; FK set after paper flush
