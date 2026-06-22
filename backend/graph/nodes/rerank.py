@@ -48,7 +48,9 @@ async def _rerank_with_retry(payload: dict, headers: dict) -> dict:
 
 async def rerank_node(state: dict) -> dict:
     rerank_model = os.environ.get("JINA_RERANK_MODEL", "jina-reranker-v2-base-multilingual")
-    top_k = int(os.environ.get("RERANK_TOP_K", "5"))
+    # Keep a wider pool than the final RERANK_TOP_K so the downstream MMR pass has
+    # material to de-duplicate; mmr_node trims to RERANK_TOP_K.
+    top_k = int(os.environ.get("RERANK_POOL_K", "12"))
 
     # Jina rejects empty strings and empty document lists. Drop chunks with no text
     # (e.g. a Qdrant hit whose chunk id has no matching SQLite row) — they carry no

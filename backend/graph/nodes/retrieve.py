@@ -48,6 +48,8 @@ async def _enrich_with_text(scored: list[ScoredChunk]) -> list[dict]:
                 "score": c.score,
                 "text": text,
                 "parent_chunk_id": parent_chunk_id,
+                # Carried for MMR de-dup; passes through rerank unchanged.
+                "dense_vector": c.dense_vector,
             }
         )
     return enriched

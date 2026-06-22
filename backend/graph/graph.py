@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from backend.graph.state import GraphState
 from backend.graph.nodes.retrieve import retrieve_node
 from backend.graph.nodes.rerank import rerank_node
+from backend.graph.nodes.mmr import mmr_node
 from backend.graph.nodes.expand import expand_node
 from backend.graph.nodes.grade import grade_node
 from backend.graph.nodes.generate import generate_node
@@ -17,6 +18,7 @@ def build_graph():
     builder.add_node("classify", classify_node)
     builder.add_node("retrieve", retrieve_node)
     builder.add_node("rerank", rerank_node)
+    builder.add_node("mmr", mmr_node)
     builder.add_node("expand", expand_node)
     builder.add_node("grade", grade_node)
     builder.add_node("chat", generate_node)
@@ -38,7 +40,8 @@ def build_graph():
     builder.add_edge("clarify", END)
     builder.add_edge("general", END)
     builder.add_edge("retrieve", "rerank")
-    builder.add_edge("rerank", "expand")
+    builder.add_edge("rerank", "mmr")
+    builder.add_edge("mmr", "expand")
     builder.add_edge("expand", "grade")
 
     builder.add_conditional_edges(

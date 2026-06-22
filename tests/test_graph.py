@@ -107,7 +107,7 @@ async def test_retrieve_node_calls_hybrid_search_with_query_dense_and_text(monke
 @pytest.mark.asyncio
 async def test_rerank_node_calls_jina_rerank_with_top_n_candidates(monkeypatch):
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
-    monkeypatch.setenv("RERANK_TOP_K", "5")
+    monkeypatch.setenv("RERANK_POOL_K", "5")
 
     mock_rerank = AsyncMock(return_value={"results": [{"index": 0, "relevance_score": 0.9}]})
 
@@ -121,13 +121,13 @@ async def test_rerank_node_calls_jina_rerank_with_top_n_candidates(monkeypatch):
     payload = mock_rerank.call_args.args[0]
     assert len(payload["documents"]) == 30  # RERANK_CANDIDATE_COUNT
     assert payload["model"]                 # a model identifier is set
-    assert payload["top_n"] == 5
+    assert payload["top_n"] == 5            # RERANK_POOL_K (mmr_node trims to RERANK_TOP_K)
 
 
 @pytest.mark.asyncio
 async def test_rerank_node_returns_top_k(monkeypatch):
     monkeypatch.setenv("RERANK_CANDIDATE_COUNT", "30")
-    monkeypatch.setenv("RERANK_TOP_K", "5")
+    monkeypatch.setenv("RERANK_POOL_K", "5")
 
     # 10 Jina results sorted by score descending
     results = [{"index": i, "relevance_score": 1.0 - i * 0.05} for i in range(10)]
@@ -139,7 +139,7 @@ async def test_rerank_node_returns_top_k(monkeypatch):
         from backend.graph.nodes.rerank import rerank_node
         result = await rerank_node(make_state(retrieved_chunks=chunks))
 
-    assert len(result["reranked_children"]) == 5  # RERANK_TOP_K
+    assert len(result["reranked_children"]) == 5  # RERANK_POOL_K; mmr trims to RERANK_TOP_K
 
 
 @pytest.mark.asyncio
