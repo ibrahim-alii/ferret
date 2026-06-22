@@ -169,6 +169,55 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;script&gt;');
   });
+
+  it('renders a GFM table with header and body cells', () => {
+    const html = renderMarkdown('| Model | Acc |\n| --- | :--: |\n| GPT | 90 |\n| Claude | 95 |');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>Model</th>');
+    expect(html).toContain('<th>Acc</th>');
+    expect(html).toContain('<td>GPT</td>');
+    expect(html).toContain('<td>95</td>');
+  });
+
+  it('applies inline formatting inside table cells', () => {
+    const html = renderMarkdown('| a | b |\n| - | - |\n| **bold** | `code` |');
+    expect(html).toContain('<td><strong>bold</strong></td>');
+    expect(html).toContain('<td><code>code</code></td>');
+  });
+
+  it('does not convert pipe tables inside code fences', () => {
+    const html = renderMarkdown('```\n| a | b |\n| - | - |\n| 1 | 2 |\n```');
+    expect(html).toContain('<pre><code>');
+    expect(html).not.toContain('<table>');
+  });
+
+  it('renders an allowlisted arxiv.org image', () => {
+    const html = renderMarkdown('![x](https://arxiv.org/html/2301.00001/x1.png)');
+    expect(html).toContain('<img');
+    expect(html).toContain('src="https://arxiv.org/html/2301.00001/x1.png"');
+    expect(html).toContain('alt="x"');
+  });
+
+  it('prefixes /media images with the backend origin', () => {
+    window.__BACKEND_URL__ = 'http://localhost:8000';
+    try {
+      const html = renderMarkdown('![x](/media/2301/p1-5.png)');
+      expect(html).toContain('<img');
+      expect(html).toContain('src="http://localhost:8000/media/2301/p1-5.png"');
+    } finally {
+      delete window.__BACKEND_URL__;
+    }
+  });
+
+  it('falls back to alt text for javascript: and data: image URLs', () => {
+    const js = renderMarkdown('![x](javascript:alert(1))');
+    expect(js).not.toContain('<img');
+    expect(js).toContain('x');
+
+    const data = renderMarkdown('![x](data:image/png;base64,AAAA)');
+    expect(data).not.toContain('<img');
+    expect(data).toContain('x');
+  });
 });
 
 describe('buildSessionEl', () => {

@@ -168,16 +168,47 @@ function escHtml(str) {
 // Supports: fenced + inline code, bold, italic, headers, unordered/ordered lists,
 // and [text](url) links restricted to http(s) URLs.
 
+const ARXIV_IMG_RE = /^https:\/\/([a-z0-9-]+\.)*arxiv\.org\//i;
+
+// Resolve an image markdown URL against the allowlist. Returns a safe src string
+// or null if the URL is not permitted (in which case the alt text is shown).
+function resolveImageSrc(url) {
+  if (ARXIV_IMG_RE.test(url)) return url;
+  if (url.startsWith('/media/')) {
+    const backend = (typeof window !== 'undefined' && window.__BACKEND_URL__) || '';
+    return backend + url;
+  }
+  return null;
+}
+
 function renderInline(text) {
   // `text` is already HTML-escaped. Apply inline spans in an order that won't
   // re-process the HTML we insert (code first, so emphasis inside code is literal).
   return text
     .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    // Images run before links: `![alt](url)` contains `[alt](url)`, so the link
+    // rule would otherwise swallow it. Off-allowlist URLs fall back to alt text.
+    .replace(/!\[([^\]]*)\]\(([^\s)]+)\)/g, (_, alt, url) => {
+      const src = resolveImageSrc(url);
+      return src
+        ? `<img class="msg-figure" src="${encodeURI(src)}" alt="${alt}">`
+        : alt;
+    })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       (_, label, url) => `<a href="${encodeURI(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`)
     .replace(/\*\*([^*]+)\*\*/g, (_, b) => `<strong>${b}</strong>`)
     .replace(/(^|[^*])\*([^*]+)\*/g, (_, pre, i) => `${pre}<em>${i}</em>`);
 }
+
+// Split a GFM table row on unescaped pipes, dropping the optional leading/trailing
+// empty cells from `| a | b |`. Cells are already HTML-escaped.
+function splitTableRow(line) {
+  const cells = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  return cells;
+}
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const TABLE_ROW_RE = /\|/;
 
 export function renderMarkdown(raw) {
   if (!raw) return '';
@@ -189,13 +220,32 @@ export function renderMarkdown(raw) {
 
   const closeList = () => { if (listType) { html.push(`</${listType}>`); listType = null; } };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (line.trim().startsWith('```')) {
       if (inCode) { html.push(`<pre><code>${codeBuf.join('\n')}</code></pre>`); codeBuf = []; inCode = false; }
       else { closeList(); inCode = true; }
       continue;
     }
     if (inCode) { codeBuf.push(line); continue; }
+
+    // GFM table: a header row with pipes, then a separator row (`| --- | :--: |`).
+    if (TABLE_ROW_RE.test(line) && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+      closeList();
+      const headers = splitTableRow(line);
+      const thead = headers.map((h) => `<th>${renderInline(h)}</th>`).join('');
+      const bodyRows = [];
+      i += 2; // skip header + separator
+      while (i < lines.length && lines[i].trim() && TABLE_ROW_RE.test(lines[i])) {
+        const cells = splitTableRow(lines[i]);
+        bodyRows.push(`<tr>${cells.map((c) => `<td>${renderInline(c)}</td>`).join('')}</tr>`);
+        i++;
+      }
+      i--; // the for-loop will increment past the last consumed line
+      const tbody = bodyRows.length ? `<tbody>${bodyRows.join('')}</tbody>` : '';
+      html.push(`<table><thead><tr>${thead}</tr></thead>${tbody}</table>`);
+      continue;
+    }
 
     const header = line.match(/^(#{1,4})\s+(.*)$/);
     const ulItem = line.match(/^\s*[-*]\s+(.*)$/);
