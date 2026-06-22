@@ -9,8 +9,11 @@ from dotenv import load_dotenv
 # binds the engine to SQLITE_DB_PATH on import).
 load_dotenv()
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -67,6 +70,12 @@ def create_app() -> FastAPI:
 
     app.include_router(papers.router)
     app.include_router(sessions.router)
+
+    # Serve figure images extracted from PDF-only papers. Referenced as
+    # /media/<arxiv_id>/<file> in chunk media_url and baked into answer markdown.
+    media_dir = Path(os.environ.get("MEDIA_DIR", "./backend/data/media"))
+    media_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
 
     return app
 
