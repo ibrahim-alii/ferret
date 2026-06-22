@@ -178,8 +178,6 @@ async def _run_chat_turn(
             full_response += content
         elif etype == "citation":
             typer.echo(f"\n[citation] {content}")
-        elif etype == "interim_message":
-            typer.echo(f"\n[…] {content}")
     typer.echo("")
     return full_response
 

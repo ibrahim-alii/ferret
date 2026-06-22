@@ -257,9 +257,6 @@ async def _stream(
                     {"step": event.get("step", ""), "content": event.get("content", "")},
                 )
 
-            elif event_type == "interim_message":
-                yield _sse("interim_message", {"content": event.get("content", "")})
-
             elif event_type == "citation":
                 citation = {
                     "arxiv_id": event.get("arxiv_id", ""),
