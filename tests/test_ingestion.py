@@ -268,18 +268,46 @@ class TestFetchMetadata:
 # parser tests
 # ---------------------------------------------------------------------------
 
+SAMPLE_HTML_TABLE = """<html><body>
+<section id="S1">
+  <h2>Results</h2>
+  <p>Our scores are summarized below.</p>
+  <figure class="ltx_table">
+    <figcaption>Table 1: Accuracy by model.</figcaption>
+    <table class="ltx_tabular">
+      <tr><th>Model</th><th>Accuracy</th></tr>
+      <tr><td>A</td><td>0.91</td></tr>
+      <tr><td>B</td><td>0.88</td></tr>
+    </table>
+  </figure>
+</section>
+</body></html>"""
+
+SAMPLE_HTML_FIGURE = """<html><body>
+<section id="S1">
+  <h2>Architecture</h2>
+  <p>The pipeline is shown in the figure.</p>
+  <figure class="ltx_figure">
+    <img src="x1.png"/>
+    <figcaption>Figure 2: System architecture overview.</figcaption>
+  </figure>
+</section>
+</body></html>"""
+
+
 class TestParser:
     def test_parse_prefers_arxiv_html_when_available(self):
         from backend.ingestion.parser import parse
 
-        sections = parse(html_content=SAMPLE_HTML, pdf_bytes=None)
+        blocks = parse(html_content=SAMPLE_HTML, pdf_bytes=None, arxiv_id="2301.00001")
 
-        section_names = [s[0].lower() for s in sections]
+        section_names = [b.section_name.lower() for b in blocks]
         assert any("introduction" in n for n in section_names)
         assert any("methods" in n for n in section_names)
 
     def test_parse_falls_back_to_pymupdf_when_html_missing(self):
         from backend.ingestion.parser import parse
+        from backend.ingestion.blocks import ParsedBlock
         import fitz  # PyMuPDF
 
         doc = fitz.open()
@@ -288,26 +316,56 @@ class TestParser:
         pdf_bytes = doc.tobytes()
         doc.close()
 
-        sections = parse(html_content=None, pdf_bytes=pdf_bytes)
+        blocks = parse(html_content=None, pdf_bytes=pdf_bytes, arxiv_id="2301.00001")
 
-        assert isinstance(sections, list)
-        for item in sections:
-            assert isinstance(item, tuple) and len(item) == 2
-            assert isinstance(item[0], str) and isinstance(item[1], str)
+        assert isinstance(blocks, list)
+        for b in blocks:
+            assert isinstance(b, ParsedBlock)
+            assert isinstance(b.section_name, str) and isinstance(b.text, str)
 
-    def test_html_and_pdf_paths_return_same_section_tuple_shape(self):
+    def test_html_path_returns_parsed_blocks(self):
+        from backend.ingestion.parser import parse
+        from backend.ingestion.blocks import ParsedBlock
+
+        blocks = parse(html_content=SAMPLE_HTML, pdf_bytes=None, arxiv_id="2301.00001")
+        for b in blocks:
+            assert isinstance(b, ParsedBlock)
+            assert b.content_type in ("text", "table", "figure")
+
+    def test_html_table_serialized_to_markdown_block(self):
         from backend.ingestion.parser import parse
 
-        html_sections = parse(html_content=SAMPLE_HTML, pdf_bytes=None)
-        for item in html_sections:
-            assert isinstance(item, tuple) and len(item) == 2
-            assert all(isinstance(x, str) for x in item)
+        blocks = parse(
+            html_content=SAMPLE_HTML_TABLE, pdf_bytes=None, arxiv_id="2301.00001"
+        )
+        tables = [b for b in blocks if b.content_type == "table"]
+        assert len(tables) == 1
+        md = tables[0].text
+        # GFM markdown: header, separator, body rows; caption preserved.
+        assert "| Model | Accuracy |" in md
+        assert "| --- | --- |" in md
+        assert "| A | 0.91 |" in md
+        assert "Table 1" in md
+        # Cell text must NOT leak into a prose block.
+        prose = " ".join(b.text for b in blocks if b.content_type == "text")
+        assert "0.91" not in prose
+
+    def test_html_figure_emits_caption_and_absolute_image_url(self):
+        from backend.ingestion.parser import parse
+
+        blocks = parse(
+            html_content=SAMPLE_HTML_FIGURE, pdf_bytes=None, arxiv_id="2301.00001"
+        )
+        figures = [b for b in blocks if b.content_type == "figure"]
+        assert len(figures) == 1
+        assert "Figure 2" in figures[0].text
+        assert figures[0].media_url == "https://arxiv.org/html/2301.00001/x1.png"
 
     def test_parse_failure_falls_back_to_abstract_only(self):
         from backend.ingestion.parser import parse
 
-        sections = parse(html_content=None, pdf_bytes=None)
-        assert sections == []
+        blocks = parse(html_content=None, pdf_bytes=None, arxiv_id="2301.00001")
+        assert blocks == []
 
 
 # ---------------------------------------------------------------------------
@@ -316,14 +374,16 @@ class TestParser:
 
 class TestFilter:
     def _make_sections(self, names):
-        return [(name, f"Content of {name}") for name in names]
+        from backend.ingestion.blocks import ParsedBlock
+
+        return [ParsedBlock(name, f"Content of {name}") for name in names]
 
     def test_section_filter_drops_references_section(self):
         from backend.ingestion.filter import filter_sections
 
         sections = self._make_sections(["Introduction", "Methods", "References"])
         result = filter_sections(sections)
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "References" not in names
 
     def test_section_filter_drops_acknowledgements_section(self):
@@ -331,7 +391,7 @@ class TestFilter:
 
         sections = self._make_sections(["Introduction", "Acknowledgements", "Results"])
         result = filter_sections(sections)
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "Acknowledgements" not in names
 
     def test_section_filter_keeps_methods_and_results_sections(self):
@@ -339,7 +399,7 @@ class TestFilter:
 
         sections = self._make_sections(["Methods", "Results", "References"])
         result = filter_sections(sections)
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "Methods" in names
         assert "Results" in names
 
@@ -348,7 +408,7 @@ class TestFilter:
 
         sections = self._make_sections(["Abstract", "References", "Acknowledgements"])
         result = filter_sections(sections)
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "Abstract" in names
 
     def test_section_filter_list_is_configurable(self):
@@ -356,24 +416,35 @@ class TestFilter:
 
         sections = self._make_sections(["Introduction", "Methods", "CustomNoise"])
         result = filter_sections(sections, drop_list=["CustomNoise"])
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "Introduction" in names
         assert "Methods" in names
         assert "CustomNoise" not in names
 
     def test_section_filter_drops_equation_only_sections(self):
-        """Sections with almost no prose after stripping LaTeX are dropped."""
+        """Prose sections with almost no text after stripping LaTeX are dropped."""
         from backend.ingestion.filter import filter_sections
+        from backend.ingestion.blocks import ParsedBlock
 
-        equation_section = ("Proof", "$x^2 + y^2 = z^2$ \\sum_{i} x_i")
-        prose_section = ("Methods", "We ran experiments on three datasets. " * 10)
+        equation_section = ParsedBlock("Proof", "$x^2 + y^2 = z^2$ \\sum_{i} x_i")
+        prose_section = ParsedBlock("Methods", "We ran experiments on three datasets. " * 10)
         result = filter_sections(
             [equation_section, prose_section],
             equation_min_prose_chars=100,
         )
-        names = [s[0] for s in result]
+        names = [b.section_name for b in result]
         assert "Proof" not in names
         assert "Methods" in names
+
+    def test_section_filter_keeps_table_blocks_with_little_prose(self):
+        """A table block has little prose but must survive the equation heuristic."""
+        from backend.ingestion.filter import filter_sections
+        from backend.ingestion.blocks import ParsedBlock
+
+        table = ParsedBlock("Results", "| a | b |\n| --- | --- |\n| 1 | 2 |", "table")
+        result = filter_sections([table], equation_min_prose_chars=100)
+        assert len(result) == 1
+        assert result[0].content_type == "table"
 
 
 # ---------------------------------------------------------------------------
@@ -381,13 +452,18 @@ class TestFilter:
 # ---------------------------------------------------------------------------
 
 class TestChunker:
+    def _blocks(self, pairs):
+        from backend.ingestion.blocks import ParsedBlock
+
+        return [ParsedBlock(name, text) for name, text in pairs]
+
     def test_chunking_creates_one_parent_per_section_plus_abstract_parent(self):
         from backend.ingestion.chunker import chunk_sections
 
-        sections = [
+        sections = self._blocks([
             ("Introduction", "Intro text " * 20),
             ("Methods", "Methods text " * 20),
-        ]
+        ])
         parents, children = chunk_sections(
             paper_id=1, abstract="The abstract.", sections=sections
         )
@@ -404,7 +480,7 @@ class TestChunker:
         """
         from backend.ingestion.chunker import chunk_sections
 
-        sections = [("Introduction", "Word " * 600)]
+        sections = self._blocks([("Introduction", "Word " * 600)])
         parents, children = chunk_sections(
             paper_id=1, abstract="Short abstract.", sections=sections
         )
@@ -421,12 +497,38 @@ class TestChunker:
         token_limit = int(os.environ.get("CHILD_CHUNK_TOKENS", "512"))
         enc = tiktoken.get_encoding("cl100k_base")
 
-        sections = [("Methods", "token " * 2000)]
+        sections = self._blocks([("Methods", "token " * 2000)])
         _, children = chunk_sections(
             paper_id=1, abstract="Abstract.", sections=sections
         )
         for child in children:
             assert len(enc.encode(child.text)) <= token_limit + 10
+
+    def test_table_block_is_atomic_and_carries_content_type(self):
+        """A long table block must NOT be token-split; it stays one child."""
+        from backend.ingestion.chunker import chunk_sections
+        from backend.ingestion.blocks import ParsedBlock
+
+        big_table = "| a | b |\n| --- | --- |\n" + ("| x | y |\n" * 800)
+        sections = [ParsedBlock("Results", big_table, "table")]
+        parents, children = chunk_sections(
+            paper_id=1, abstract="Abstract.", sections=sections
+        )
+        table_children = [c for c in children if c.content_type == "table"]
+        assert len(table_children) == 1
+        assert table_children[0].text == big_table
+
+    def test_figure_block_propagates_media_url(self):
+        from backend.ingestion.chunker import chunk_sections
+        from backend.ingestion.blocks import ParsedBlock
+
+        fig = ParsedBlock("Arch", "Figure 1: overview", "figure", media_url="/media/x/p1-2.png")
+        parents, children = chunk_sections(
+            paper_id=1, abstract="Abstract.", sections=[fig]
+        )
+        fig_children = [c for c in children if c.content_type == "figure"]
+        assert len(fig_children) == 1
+        assert fig_children[0].media_url == "/media/x/p1-2.png"
 
 
 # ---------------------------------------------------------------------------

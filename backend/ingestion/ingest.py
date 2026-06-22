@@ -95,7 +95,7 @@ async def _run_ingestion(arxiv_id: str, force: bool = False) -> PaperRecord:
         # so parsing inline would stall every concurrent SSE chat stream on this worker
         # for the duration. Offload it to a thread.
         raw_sections = await asyncio.to_thread(
-            parse, html_content=html_content, pdf_bytes=pdf_bytes
+            parse, html_content=html_content, pdf_bytes=pdf_bytes, arxiv_id=arxiv_id
         )
         filtered_sections = filter_sections(raw_sections)
         parents, children = chunk_sections(
@@ -158,6 +158,7 @@ async def _run_ingestion(arxiv_id: str, force: bool = False) -> PaperRecord:
                     chunk_type=child.chunk_type,
                     dense_vector=vector,
                     text=child.text,
+                    content_type=child.content_type,
                 )
                 for child, vector in zip(children, vectors)
             ]

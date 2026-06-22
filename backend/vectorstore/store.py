@@ -100,6 +100,7 @@ async def _upsert_chunks(client: AsyncQdrantClient, chunks: list[ChunkVector]) -
                     "paper_id": chunk.paper_id,
                     "section_name": chunk.section_name,
                     "chunk_type": chunk.chunk_type,
+                    "content_type": chunk.content_type,
                 },
             )
             points.append(point)
@@ -165,6 +166,8 @@ async def _hybrid_search(
         limit=limit,
         query_filter=qfilter,
         with_payload=True,
+        # Dense vectors are needed downstream for MMR de-duplication (Ask mode).
+        with_vectors=[_DENSE_NAME],
     )
 
     results: list[ScoredChunk] = []
@@ -173,6 +176,7 @@ async def _hybrid_search(
         paper = payload.get("paper_id", "")
         if not paper:
             logger.warning("Point %s missing paper_id in payload", hit.id)
+        vectors = hit.vector if isinstance(hit.vector, dict) else {}
         results.append(
             ScoredChunk(
                 chunk_id=payload.get("chunk_id", str(hit.id)),
@@ -180,6 +184,8 @@ async def _hybrid_search(
                 section_name=payload.get("section_name", ""),
                 chunk_type=payload.get("chunk_type", ""),
                 score=hit.score,
+                content_type=payload.get("content_type", "text"),
+                dense_vector=vectors.get(_DENSE_NAME),
             )
         )
     return results

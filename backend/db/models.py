@@ -59,6 +59,10 @@ class Chunk(Base):
         Integer, ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     chunk_type: Mapped[str] = mapped_column(String(16), nullable=False)  # "parent" | "child"
+    content_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="text"
+    )  # "text" | "table" | "figure"
+    media_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # figures only
     section_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
     text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     parent_chunk_id: Mapped[int | None] = mapped_column(

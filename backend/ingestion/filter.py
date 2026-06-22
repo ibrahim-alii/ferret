@@ -8,6 +8,8 @@ import logging
 import os
 import re
 
+from backend.ingestion.blocks import ParsedBlock
+
 log = logging.getLogger(__name__)
 
 _DEFAULT_DROP_PREFIXES: list[str] = [
@@ -56,15 +58,17 @@ def _load_env_drop_list() -> list[str] | None:
 
 
 def filter_sections(
-    sections: list[tuple[str, str]],
+    blocks: list[ParsedBlock],
     drop_list: list[str] | None = None,
     equation_min_prose_chars: int | None = None,
-) -> list[tuple[str, str]]:
+) -> list[ParsedBlock]:
     """
-    Remove sections that add retrieval noise:
+    Remove blocks that add retrieval noise:
     1. Name-prefix match against drop_list (case-insensitive).
     2. Equation-only heuristic: prose < equation_min_prose_chars after stripping LaTeX.
-    Sections whose names start with an always-keep prefix are never dropped.
+       Applied to prose blocks only — tables/figures carry little prose by design and
+       must never be dropped by this rule.
+    Blocks whose section names start with an always-keep prefix are never dropped.
     """
     if drop_list is None:
         drop_list = _load_env_drop_list() or _DEFAULT_DROP_PREFIXES
@@ -76,22 +80,24 @@ def filter_sections(
     drop_lower = [d.lower() for d in drop_list]
     keep_lower = [k.lower() for k in _ALWAYS_KEEP_PREFIXES]
 
-    result: list[tuple[str, str]] = []
-    for name, text in sections:
-        name_lower = name.lower().strip()
+    result: list[ParsedBlock] = []
+    for block in blocks:
+        name_lower = block.section_name.lower().strip()
 
         if any(name_lower.startswith(k) for k in keep_lower):
-            result.append((name, text))
+            result.append(block)
             continue
 
         if any(name_lower.startswith(d) for d in drop_lower):
-            log.debug("Dropping section (name match): %r", name)
+            log.debug("Dropping section (name match): %r", block.section_name)
             continue
 
-        if _is_equation_only(text, equation_min_prose_chars):
-            log.debug("Dropping equation-only section: %r", name)
+        if block.content_type == "text" and _is_equation_only(
+            block.text, equation_min_prose_chars
+        ):
+            log.debug("Dropping equation-only section: %r", block.section_name)
             continue
 
-        result.append((name, text))
+        result.append(block)
 
     return result

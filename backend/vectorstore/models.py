@@ -11,6 +11,7 @@ class ChunkVector:
     chunk_type: str
     dense_vector: list[float]
     text: str
+    content_type: str = "text"  # "text" | "table" | "figure"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,3 +21,6 @@ class ScoredChunk:
     section_name: str
     chunk_type: str
     score: float
+    content_type: str = "text"
+    # Dense embedding, populated only when the query requests vectors (MMR de-dup).
+    dense_vector: list[float] | None = None
