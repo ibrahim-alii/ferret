@@ -60,7 +60,7 @@ class Chunk(Base):
     )
     chunk_type: Mapped[str] = mapped_column(String(16), nullable=False)  # "parent" | "child"
     content_type: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="text"
+        String(16), nullable=False, default="text", server_default="text"
     )  # "text" | "table" | "figure"
     media_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # figures only
     section_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")

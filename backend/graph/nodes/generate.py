@@ -253,7 +253,8 @@ def _emit_media(parent_sections: list[dict]) -> None:
         text = (sec.get("text") or "").strip()
 
         if ctype == "table":
-            key = f"t:{sec.get('paper_id')}:{hash(text)}"
+            # Deterministic dedup key (hash() is per-process salted).
+            key = f"t:{sec.get('paper_id')}:{text}"
             if key in seen or not text:
                 continue
             seen.add(key)

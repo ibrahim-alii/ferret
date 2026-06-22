@@ -166,8 +166,9 @@ async def _hybrid_search(
         limit=limit,
         query_filter=qfilter,
         with_payload=True,
-        # Dense vectors are needed downstream for MMR de-duplication (Ask mode).
-        with_vectors=[_DENSE_NAME],
+        # Dense vectors are only needed for Ask-mode MMR de-dup (paper_id is None);
+        # Deep Dive skips them to avoid shipping vectors it won't use.
+        with_vectors=[_DENSE_NAME] if paper_id is None else False,
     )
 
     results: list[ScoredChunk] = []

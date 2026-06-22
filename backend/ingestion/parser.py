@@ -21,10 +21,22 @@ from backend.ingestion.blocks import ParsedBlock
 log = logging.getLogger(__name__)
 
 _FIGURE_CAPTION_RE = re.compile(r"^\s*(figure|fig\.?)\s*\d+", re.IGNORECASE)
+# arXiv ids may contain a slash (old style, e.g. "hep-th/9901001"); allow that but
+# strip anything that could escape the media directory.
+_SAFE_ID_RE = re.compile(r"[^A-Za-z0-9._/-]")
+# Image extensions PyMuPDF may report; anything else is coerced to png so a crafted
+# PDF can't smuggle path separators through extract_image()'s ext field.
+_ALLOWED_IMG_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+
+
+def _safe_id(arxiv_id: str) -> str:
+    return _SAFE_ID_RE.sub("", arxiv_id).replace("..", "")
 
 
 def _media_dir() -> Path:
-    return Path(os.environ.get("MEDIA_DIR", "./backend/data/media"))
+    # Resolve to an absolute path so the parser (run via asyncio.to_thread) and the
+    # FastAPI StaticFiles mount always agree regardless of the process CWD.
+    return Path(os.environ.get("MEDIA_DIR", "./backend/data/media")).resolve()
 
 
 # --------------------------------------------------------------------------- #
@@ -70,7 +82,7 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html_content, "lxml")
-    base = f"https://arxiv.org/html/{arxiv_id}/"
+    base = f"https://arxiv.org/html/{_safe_id(arxiv_id)}/"
     blocks: list[ParsedBlock] = []
 
     for sec in soup.find_all("section"):
@@ -95,7 +107,9 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
                 img = fig.find("img")
                 src = img.get("src") if img else None
                 url = urljoin(base, src) if src else None
-                if url and not url.startswith(("http://", "https://")):
+                # Only hotlink images that resolve back onto arxiv.org; a crafted
+                # src (or arxiv_id) must not point the rendered <img> elsewhere.
+                if url and not url.startswith("https://arxiv.org/"):
                     url = None
                 if caption or url:
                     blocks.append(
@@ -156,12 +170,15 @@ def _extract_pdf_image(doc, page, caption_bbox, arxiv_id: str) -> str | None:
     if not extracted or not extracted.get("image"):
         return None
 
-    ext = extracted.get("ext", "png")
-    out_dir = _media_dir() / arxiv_id
+    ext = str(extracted.get("ext", "png")).lower()
+    if ext not in _ALLOWED_IMG_EXTS:
+        ext = "png"
+    safe_id = _safe_id(arxiv_id)
+    out_dir = _media_dir() / safe_id
     out_dir.mkdir(parents=True, exist_ok=True)
     fname = f"p{page.number}-{xref}.{ext}"
     (out_dir / fname).write_bytes(extracted["image"])
-    return f"/media/{arxiv_id}/{fname}"
+    return f"/media/{safe_id}/{fname}"
 
 
 def _parse_pdf(pdf_bytes: bytes, arxiv_id: str) -> list[ParsedBlock]:

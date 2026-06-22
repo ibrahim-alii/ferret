@@ -361,6 +361,21 @@ class TestParser:
         assert "Figure 2" in figures[0].text
         assert figures[0].media_url == "https://arxiv.org/html/2301.00001/x1.png"
 
+    def test_html_figure_rejects_non_arxiv_image_url(self):
+        """A crafted <img src> must not hotlink off arxiv.org."""
+        from backend.ingestion.parser import parse
+
+        html = SAMPLE_HTML_FIGURE.replace('src="x1.png"', 'src="https://evil.com/x.png"')
+        blocks = parse(html_content=html, pdf_bytes=None, arxiv_id="2301.00001")
+        figures = [b for b in blocks if b.content_type == "figure"]
+        assert figures and figures[0].media_url is None
+
+    def test_safe_id_strips_path_traversal(self):
+        from backend.ingestion.parser import _safe_id
+
+        assert ".." not in _safe_id("../../etc/passwd")
+        assert _safe_id("hep-th/9901001") == "hep-th/9901001"  # legit old-style id kept
+
     def test_parse_failure_falls_back_to_abstract_only(self):
         from backend.ingestion.parser import parse
 
