@@ -177,7 +177,7 @@ describe('buildSessionEl', () => {
     const summary = { session_id: 's1', mode: 'deep_dive', title: 'Attention paper' };
     const el = buildSessionEl(summary, (s) => selected.push(s));
     expect(el.textContent).toContain('Attention paper');
-    expect(el.textContent).toContain('Deep Dive');
+    expect(el.textContent).toContain('Deep-dive');
     expect(el.dataset.sessionId).toBe('s1');
     el.click();
     expect(selected).toEqual([summary]);

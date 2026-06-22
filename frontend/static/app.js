@@ -136,13 +136,16 @@ export function buildCitationEl({ arxiv_id, title, abstract_snippet }) {
   return el;
 }
 
+export function modeLabel(mode) {
+  return mode === 'deep_dive' ? 'Deep-dive' : 'Ask';
+}
+
 export function buildSessionEl({ session_id, mode, title }, onSelect) {
   const el = document.createElement('li');
   el.classList.add('session-item');
   el.dataset.sessionId = session_id;
   el.innerHTML = `
-    <span class="session-item-title">${escHtml(title)}</span>
-    <span class="session-item-mode">${escHtml(mode === 'deep_dive' ? 'Deep Dive' : 'Ask')}</span>
+    <span class="session-item-title"><span class="session-item-mode">${escHtml(modeLabel(mode))}:</span> ${escHtml(title)}</span>
   `;
   if (onSelect) el.addEventListener('click', () => onSelect({ session_id, mode, title }));
   return el;
@@ -467,6 +470,20 @@ export async function loadSessions() {
   }
 }
 
+/**
+ * PATCH /sessions/{sessionId} to rename a chat. Returns the updated summary.
+ * Exported for testing.
+ */
+export async function renameSession(sessionId, title) {
+  const res = await fetch(`${BACKEND}/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error(`PATCH /sessions/${sessionId} → ${res.status}`);
+  return res.json();
+}
+
 async function apiPost(path, body) {
   const res = await fetch(`${BACKEND}${path}`, {
     method: 'POST',
@@ -498,21 +515,176 @@ function initApp() {
   const chatInput   = document.getElementById('chat-input');
   const chatBtn     = document.getElementById('chat-btn');
   const sessionList = document.getElementById('session-list');
-  const modeBadge      = document.getElementById('mode-badge');
-  const modeBadgeLabel = document.getElementById('mode-badge-label');
+  const chatArea    = document.querySelector('.chat-area');
+  const chatHeader  = document.getElementById('chat-header');
+  const chatModeEl  = document.getElementById('chat-mode');
+  const chatTitleEl = document.getElementById('chat-title');
+  const themeToggle   = document.getElementById('theme-toggle');
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  const sidebarResizer = document.getElementById('sidebar-resizer');
+  const sidebar       = document.getElementById('sidebar');
 
   const MODE_LABELS = { ask: 'Ask', deep_dive: 'Deep Dive' };
 
-  // Persistent top-right indicator of the active chat's mode. Pass null to hide
-  // it (e.g. the new-chat picker, where no mode is chosen yet).
-  function setModeBadge(mode) {
-    if (!modeBadge) return;
+  // Track the active session's title so we can rename it in place.
+  let currentTitle = '';
+
+  // Chat-area header: mode label (left) + renamable title (right). Pass null to
+  // hide it entirely (e.g. the new-chat picker, where no mode is chosen yet).
+  function setChatHeader(mode, title) {
+    if (!chatHeader) return;
     if (!mode) {
-      modeBadge.hidden = true;
+      chatHeader.hidden = true;
+      currentTitle = '';
       return;
     }
-    modeBadgeLabel.textContent = MODE_LABELS[mode] || mode;
-    modeBadge.hidden = false;
+    chatModeEl.textContent = MODE_LABELS[mode] || mode;
+    currentTitle = title || '';
+    chatTitleEl.textContent = currentTitle;
+    chatHeader.hidden = false;
+  }
+
+  // Backwards-compatible alias used throughout the flow.
+  function setModeBadge(mode) {
+    if (!mode) setChatHeader(null);
+    // When only the mode is known (mode just picked, no title yet) keep any
+    // existing title text.
+    else setChatHeader(mode, currentTitle);
+  }
+
+  // ── Theme (dark / light), persisted ──
+  const THEME_KEY = 'ferret_theme';
+  function applyTheme(theme) {
+    const dark = theme === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    if (themeToggle) themeToggle.setAttribute('aria-pressed', String(dark));
+  }
+  try {
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+  } catch { applyTheme('light'); }
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const next =
+        document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem(THEME_KEY, next); } catch { /* ignore */ }
+    });
+  }
+
+  // ── Sidebar: collapse toggle + drag-to-resize, both persisted ──
+  const SIDEBAR_WIDTH_KEY = 'ferret_sidebar_width';
+  const SIDEBAR_COLLAPSED_KEY = 'ferret_sidebar_collapsed';
+
+  try {
+    const savedWidth = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY), 10);
+    if (savedWidth >= 180 && savedWidth <= 480) {
+      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+    }
+    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
+      document.body.classList.add('sidebar-collapsed');
+    }
+  } catch { /* ignore */ }
+
+  function syncToggleState() {
+    if (!sidebarToggle) return;
+    const collapsed = document.body.classList.contains('sidebar-collapsed');
+    sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+  }
+  syncToggleState();
+
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', () => {
+      const collapsed = document.body.classList.toggle('sidebar-collapsed');
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* ignore */ }
+      syncToggleState();
+    });
+  }
+
+  if (sidebarResizer && sidebar) {
+    let dragging = false;
+    let rafId = null;
+    let pendingW = null;
+    const flush = () => {
+      rafId = null;
+      if (pendingW != null) {
+        document.documentElement.style.setProperty('--sidebar-width', `${pendingW}px`);
+      }
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      // Coalesce pointer moves to one write per frame to avoid layout thrash.
+      pendingW = Math.min(480, Math.max(180, e.clientX));
+      if (rafId == null) rafId = requestAnimationFrame(flush);
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (rafId != null) { cancelAnimationFrame(rafId); flush(); }
+      document.body.classList.remove('sidebar-resizing');
+      const w = parseInt(getComputedStyle(sidebar).width, 10);
+      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w)); } catch { /* ignore */ }
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    sidebarResizer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      dragging = true;
+      document.body.classList.add('sidebar-resizing');
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // ── Rename the active chat by clicking the header title ──
+  function beginRename() {
+    if (!chatTitleEl || !state.sessionId || chatHeader.hidden) return;
+    if (!chatTitleEl.isConnected) return; // already renaming
+    const existing = currentTitle || chatTitleEl.textContent.trim();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'chat-title-input';
+    input.value = existing;
+    input.setAttribute('aria-label', 'Rename chat');
+    chatTitleEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    // Escape cancels: removing the focused input fires blur, so this flag stops
+    // that blur from committing the typed-but-discarded value.
+    let cancelled = false;
+
+    const restore = (title) => {
+      currentTitle = title;
+      chatTitleEl.textContent = title;
+      input.replaceWith(chatTitleEl);
+    };
+    const commit = async () => {
+      if (cancelled) return;
+      const next = input.value.trim();
+      const prev = currentTitle;
+      if (!next || next === prev) { restore(prev); return; }
+      restore(next);
+      try {
+        await renameSession(state.sessionId, next);
+        refreshSessions();
+      } catch {
+        // Revert UI if the server rejected the rename.
+        restore(prev);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      else if (e.key === 'Escape') { cancelled = true; restore(currentTitle); }
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  if (chatTitleEl) {
+    chatTitleEl.addEventListener('click', beginRename);
+    chatTitleEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); beginRename(); }
+    });
   }
 
   // New-chat empty state: no session yet, input locked until a mode is picked.
@@ -543,7 +715,15 @@ function initApp() {
     }
     for (const s of sessions) {
       const el = buildSessionEl(s, openSession);
-      if (s.session_id === state.sessionId) el.classList.add('active');
+      if (s.session_id === state.sessionId) {
+        el.classList.add('active');
+        // Keep the header title in sync once the backend generates one.
+        if (!chatHeader.hidden && s.title && s.title !== currentTitle &&
+            chatTitleEl.isConnected) {
+          currentTitle = s.title;
+          chatTitleEl.textContent = s.title;
+        }
+      }
       sessionList.appendChild(el);
     }
   }
@@ -551,7 +731,7 @@ function initApp() {
   async function openSession(summary) {
     modePicker.hidden = true;
     state.setMode(summary.mode);
-    setModeBadge(summary.mode);
+    setChatHeader(summary.mode, summary.title);
     const isDeep = summary.mode === 'deep_dive';
     arxivSection.hidden = !isDeep;
     statusEl.textContent = isDeep && summary.paper_id ? `Paper · ${summary.paper_id}` : '';
@@ -677,6 +857,10 @@ function initApp() {
   }
 
   // ── Chat send ──
+  // While a response streams, the textarea stays editable (so the user can draft
+  // their next question) but the send button is locked and re-sends are blocked.
+  let isSending = false;
+
   chatBtn.addEventListener('click', () => sendMessage());
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -684,10 +868,11 @@ function initApp() {
 
   async function sendMessage() {
     const text = chatInput.value.trim();
-    if (!text || !state.sessionId) return;
+    if (!text || !state.sessionId || isSending) return;
 
     chatInput.value = '';
-    disableChat(chatInput, chatBtn);
+    isSending = true;
+    chatBtn.disabled = true;
 
     chatList.appendChild(buildMessageEl('user', text));
 
@@ -739,7 +924,8 @@ function initApp() {
           if (thinking.el.isConnected) thinking.el.remove();
           assistantEl.textContent = '[Error — please try again]';
           assistantEl.classList.add('msg-error');
-          enableChat(chatInput, chatBtn);
+          isSending = false;
+          chatBtn.disabled = false;
         },
       }
     );
@@ -749,7 +935,8 @@ function initApp() {
       // The typewriter streamed raw markdown as plain text; now render it formatted.
       assistantEl.innerHTML = renderMarkdown(assistantEl.textContent);
       completeOnce();
-      enableChat(chatInput, chatBtn);
+      isSending = false;
+      chatBtn.disabled = false;
       refreshSessions();
     }
   }
@@ -757,12 +944,12 @@ function initApp() {
   const STICK_THRESHOLD_PX = 80;
   let stickToBottom = true;
   function atBottom() {
-    const gap = chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight;
+    const gap = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight;
     return gap <= STICK_THRESHOLD_PX;
   }
-  chatList.addEventListener('scroll', () => { stickToBottom = atBottom(); });
+  chatArea.addEventListener('scroll', () => { stickToBottom = atBottom(); });
   function scrollBottom({ force = false } = {}) {
     if (force) stickToBottom = true;
-    if (stickToBottom) chatList.scrollTop = chatList.scrollHeight;
+    if (stickToBottom) chatArea.scrollTop = chatArea.scrollHeight;
   }
 }

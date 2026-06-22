@@ -60,6 +60,18 @@ class PostSessionResponse(BaseModel):
     session_id: str
 
 
+class PatchSessionRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be blank")
+        return v
+
+
 class SessionSummary(BaseModel):
     session_id: str
     mode: str

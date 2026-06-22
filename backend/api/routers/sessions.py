@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.limiter import limiter
 from backend.api.schemas import (
     MessageResponse,
+    PatchSessionRequest,
     PostMessageRequest,
     PostSessionRequest,
     PostSessionResponse,
@@ -136,6 +137,35 @@ async def post_session(
     await db.commit()
     await db.refresh(session)
     return PostSessionResponse(session_id=session.session_id)
+
+
+@router.patch("/{session_id}", response_model=SessionSummary)
+async def rename_session(
+    session_id: str,
+    body: PatchSessionRequest,
+    db: AsyncSession = Depends(get_session),
+    x_client_id: str | None = Header(default=None),
+) -> SessionSummary:
+    """Rename a chat (sets a user-defined title for the history sidebar)."""
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Lenient ownership: legacy rows (client_id is None) stay accessible.
+    if session.client_id is not None and session.client_id != x_client_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.title = body.title
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+
+    return SessionSummary(
+        session_id=session.session_id,
+        mode=session.mode,
+        paper_id=session.paper_id,
+        created_at=session.created_at,
+        title=session.title,
+    )
 
 
 @router.post(

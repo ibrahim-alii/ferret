@@ -192,6 +192,45 @@ async def test_post_sessions_writes_session_row_to_sqlite(client, session_factor
 
 
 @pytest.mark.asyncio
+async def test_patch_session_renames_chat(client):
+    headers = {"X-Client-ID": "client-1"}
+    resp = await client.post("/sessions", json={"mode": "ask"}, headers=headers)
+    sid = resp.json()["session_id"]
+
+    resp = await client.patch(f"/sessions/{sid}", json={"title": "My renamed chat"}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "My renamed chat"
+
+    resp = await client.get("/sessions", headers=headers)
+    assert resp.json()[0]["title"] == "My renamed chat"
+
+
+@pytest.mark.asyncio
+async def test_patch_session_unknown_id_returns_404(client):
+    resp = await client.patch("/sessions/does-not-exist", json={"title": "x"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_session_blank_title_rejected(client):
+    headers = {"X-Client-ID": "client-1"}
+    resp = await client.post("/sessions", json={"mode": "ask"}, headers=headers)
+    sid = resp.json()["session_id"]
+    resp = await client.patch(f"/sessions/{sid}", json={"title": "   "}, headers=headers)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_session_rejects_other_client(client):
+    resp = await client.post("/sessions", json={"mode": "ask"}, headers={"X-Client-ID": "owner"})
+    sid = resp.json()["session_id"]
+    resp = await client.patch(
+        f"/sessions/{sid}", json={"title": "hijack"}, headers={"X-Client-ID": "intruder"}
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_get_sessions_empty_when_none(client):
     resp = await client.get("/sessions")
     assert resp.status_code == 200

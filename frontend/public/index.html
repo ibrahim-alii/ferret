@@ -3,33 +3,53 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ferret — Research Intelligence</title>
+  <title>Ferret</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Newsreader:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+  <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+    <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+  </button>
+
   <aside id="sidebar" class="sidebar" aria-label="Chat history">
+    <div class="sidebar-brand">
+      <span class="logo-text">ferret</span>
+      <span class="logo-mark" aria-hidden="true">f</span>
+    </div>
     <button id="new-chat-btn" class="new-chat-btn" aria-label="Start a new chat">
-      <span class="new-chat-icon" aria-hidden="true">＋</span> New chat
+      <span class="new-chat-icon" aria-hidden="true">＋</span>
+      <span class="new-chat-label">New chat</span>
     </button>
     <div class="sidebar-head">
       <span class="sidebar-title">History</span>
     </div>
     <ul id="session-list" class="session-list" aria-live="polite"></ul>
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize sidebar"></div>
   </aside>
 
   <div id="app">
-    <header class="app-header">
-      <div class="brand">
-        <div class="logo">
-          <span class="logo-text">Ferret</span>
-        </div>
-        <p class="logo-sub">Research Intelligence</p>
-      </div>
-      <div id="mode-badge" class="mode-badge" hidden aria-live="polite">
-        <span id="mode-badge-label" class="mode-badge-label"></span>
+    <header id="chat-header" class="app-header" hidden>
+      <span
+        id="chat-title"
+        class="chat-title"
+        role="button"
+        tabindex="0"
+        title="Click to rename this chat"
+      ></span>
+      <div class="chat-header-right">
+        <span id="chat-mode" class="chat-mode" aria-live="polite"></span>
+        <button
+          id="theme-toggle"
+          class="theme-toggle"
+          type="button"
+          aria-label="Toggle dark mode"
+          aria-pressed="false"
+        >
+          <span class="theme-toggle-icon" aria-hidden="true"></span>
+        </button>
       </div>
     </header>
 
@@ -72,17 +92,19 @@
       ></div>
 
       <div class="input-row">
-        <label for="chat-input" class="sr-only">Message</label>
-        <textarea
-          id="chat-input"
-          rows="1"
-          placeholder="Ask a question…"
-          disabled
-          aria-label="Chat message"
-        ></textarea>
-        <button id="chat-btn" disabled aria-label="Send message">
-          <span aria-hidden="true">↑</span>
-        </button>
+        <div class="input-inner">
+          <label for="chat-input" class="sr-only">Message</label>
+          <textarea
+            id="chat-input"
+            rows="1"
+            placeholder="Ask a question…"
+            disabled
+            aria-label="Chat message"
+          ></textarea>
+          <button id="chat-btn" disabled aria-label="Send message">
+            <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </div>
     </main>
   </div>

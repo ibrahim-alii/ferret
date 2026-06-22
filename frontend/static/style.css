@@ -11,6 +11,8 @@
   --accent-soft:  #A86A6A;
   --accent-weak:  rgba(122, 46, 46, 0.08);
   --accent-weak-2:rgba(122, 46, 46, 0.14);
+  --sidebar-pill:      #E7E0D0;
+  --sidebar-pill-hover:#DED6C2;
   --sage:         #5B6B58;
   --text:         #1C1B19;
   --text-dim:     #5C574C;
@@ -22,7 +24,30 @@
   --display:      'Fraunces', Georgia, serif;
   --sans:         'Newsreader', Georgia, serif;
   --reading:      'Newsreader', Georgia, serif;
+  --sidebar-width: 240px;
 }
+
+/* Dark mode — "ink reversed": warm near-black paper, parchment text, same crimson */
+[data-theme="dark"] {
+  --bg:           #16140F;
+  --bg-card:      #201D16;
+  --bg-input:     #1B1812;
+  --border:       #3A352A;
+  --accent:       #C75B4A;
+  --accent-soft:  #A8584F;
+  --accent-weak:  rgba(199, 91, 74, 0.12);
+  --accent-weak-2:rgba(199, 91, 74, 0.20);
+  --sidebar-pill:      #262219;
+  --sidebar-pill-hover:#302B20;
+  --sage:         #9FA886;
+  --text:         #ECE6D8;
+  --text-dim:     #B3AB98;
+  --text-muted:   #7C7563;
+  --green:        #7FA279;
+  --red:          #E0726A;
+}
+
+html { transition: background 0.25s ease, color 0.25s ease; }
 
 html, body {
   height: 100%;
@@ -38,43 +63,153 @@ body { display: flex; }
 
 /* ── History sidebar ── */
 .sidebar {
-  width: 240px;
+  position: relative;
+  width: var(--sidebar-width);
+  min-width: 180px;
+  max-width: 480px;
   flex-shrink: 0;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
   border-right: 1px solid var(--border);
   background: var(--bg-card);
-  padding: 1.5rem 0.75rem;
+  padding: 0.85rem 0.75rem 1.5rem;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  transition: width 0.22s ease, padding 0.22s ease, opacity 0.18s ease;
 }
+
+/* No width animation mid-drag — the pointer drives width directly, so any
+   transition just adds visible lag. */
+body.sidebar-resizing .sidebar { transition: none; }
+
+/* Collapsed: a narrow rail (Claude-style) still showing the F monogram and the
+   new-chat +; history and labels are hidden. */
+body.sidebar-collapsed .sidebar {
+  width: 64px;
+  min-width: 64px;
+  padding: 3.4rem 0 1.5rem;
+  align-items: center;
+}
+
+body.sidebar-collapsed .sidebar-head,
+body.sidebar-collapsed .session-list,
+body.sidebar-collapsed .new-chat-label,
+body.sidebar-collapsed .logo-text { display: none; }
+
+body.sidebar-collapsed .logo-mark { display: inline-block; }
+
+/* Ferret nameplate, top of the sidebar — left aligned, lighter weight, larger. */
+.sidebar-brand {
+  padding: 0 0.5rem 1.1rem;
+}
+
+.sidebar-brand .logo-text {
+  font-family: var(--display);
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* Big "F" monogram shown only in the collapsed rail. */
+.logo-mark {
+  display: none;
+  font-family: var(--display);
+  font-size: 1.9rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+body.sidebar-collapsed .sidebar-brand { padding: 0 0 1rem; }
+
+/* Drag handle on the right edge to resize the sidebar. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.sidebar-resizer:hover,
+body.sidebar-resizing .sidebar-resizer {
+  background: var(--accent-weak-2);
+}
+
+body.sidebar-collapsed .sidebar-resizer { display: none; }
+
+/* Floating collapse/expand toggle, always reachable. */
+.sidebar-toggle {
+  position: fixed;
+  top: 0.85rem;
+  left: calc(var(--sidebar-width) - 14px);
+  z-index: 20;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: left 0.22s ease, background 0.15s, transform 0.15s;
+}
+
+.sidebar-toggle:hover { background: var(--sidebar-pill-hover); }
+
+.sidebar-toggle-icon { display: inline-flex; line-height: 1; }
+.sidebar-toggle-icon::before { content: "◧"; font-size: 1.05rem; }
+
+body.sidebar-collapsed .sidebar-toggle { left: 18px; }
+body.sidebar-collapsed .sidebar-toggle-icon::before { content: "◨"; }
+
+body.sidebar-resizing { cursor: col-resize; user-select: none; }
 
 .new-chat-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.4rem;
   width: 100%;
   margin-bottom: 1.25rem;
-  padding: 0.6rem 0.75rem;
-  background: var(--accent-weak);
-  border: 1px solid var(--accent-soft);
-  border-radius: var(--radius);
+  padding: 0.6rem 1rem;
+  background: var(--sidebar-pill);
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: var(--accent);
   font-family: var(--mono);
   font-size: 0.8rem;
   letter-spacing: 0.04em;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 
 .new-chat-btn:hover {
-  background: var(--accent-weak-2);
-  border-color: var(--accent);
+  background: var(--sidebar-pill-hover);
   transform: translateY(-1px);
 }
 
-.new-chat-icon { font-size: 1em; line-height: 1; }
+.new-chat-icon { font-size: 1.05em; line-height: 1; }
+
+/* Collapsed rail: + becomes a centered square icon button. */
+body.sidebar-collapsed .new-chat-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0 auto;
+  justify-content: center;
+}
+body.sidebar-collapsed .new-chat-icon { font-size: 1.25rem; }
 
 .sidebar-head {
   display: flex;
@@ -91,36 +226,33 @@ body { display: flex; }
   color: var(--sage);
 }
 
-.session-list { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+.session-list { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
 
 .session-item {
-  padding: 0.5rem 0.6rem;
-  border-radius: var(--radius);
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
   cursor: pointer;
+  text-align: left;
+  background: var(--sidebar-pill);
   border: 1px solid transparent;
   transition: background 0.15s, border-color 0.15s;
 }
 
-.session-item:hover { background: var(--bg-input); border-color: var(--border); }
+.session-item:hover { background: var(--sidebar-pill-hover); }
 .session-item.active { border-color: var(--accent-soft); background: var(--accent-weak); }
 
 .session-item-title {
   display: block;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.session-item-mode {
-  display: block;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.session-item-title .session-item-mode {
   color: var(--sage);
-  margin-top: 0.15rem;
+  font-style: italic;
 }
 
 .session-empty {
@@ -130,7 +262,10 @@ body { display: flex; }
   font-style: italic;
 }
 
-@media (max-width: 720px) { .sidebar { display: none; } }
+@media (max-width: 720px) {
+  .sidebar { display: none; }
+  .input-row { left: 0; }
+}
 
 .sr-only {
   position: absolute; width: 1px; height: 1px;
@@ -144,78 +279,114 @@ body { display: flex; }
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
+  width: 100%;
+  /* No horizontal padding: the chat area is the scroll container and must reach
+     the viewport's right edge so its scrollbar sits at the far edge. Inner
+     sections re-add their own side gutters. */
+  padding: 0;
 }
 
-/* ── Header (journal masthead: crimson double-rule beneath the nameplate) ── */
+/* ── Chat header (floating: renamable title on the left, mode + theme on the right) ── */
 .app-header {
   position: relative;
-  padding: 2rem 0 1rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.25rem;
+  padding: 1rem 2.5rem 0.5rem;
+  margin-bottom: 0.5rem;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  background: transparent;
 }
 
-.app-header::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -4px;
-  height: 2px;
-  background: var(--accent);
-}
+.app-header[hidden] { display: none; }
 
-/* Persistent mode indicator (top-right): reminds the user which mode the
-   current chat is in. Mirrors the chosen mode card. */
-.mode-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.7rem;
-  background: var(--accent-weak);
-  border: 1px solid var(--accent-soft);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.mode-badge[hidden] { display: none; }
-
-.mode-badge-label {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--sage);
-}
-
-.logo {
+.chat-header-right {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.85rem;
+  flex-shrink: 0;
 }
 
-
-.logo-text {
+/* Mode label and title share the same font size (only the family differs). */
+.chat-mode {
   font-family: var(--display);
-  font-size: 1.6rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
+  font-size: 1.15rem;
+  font-weight: 400;
   color: var(--text);
 }
 
-.logo-sub {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--sage);
-  margin-top: 0.2rem;
+.chat-title {
+  font-family: var(--reading);
+  font-size: 1.15rem;
+  color: var(--text-dim);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.chat-title:hover,
+.chat-title:focus-visible {
+  background: var(--accent-weak);
+  border-color: var(--border);
+  outline: none;
+}
+
+.chat-title-input {
+  font-family: var(--reading);
+  font-size: 1.15rem;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.5rem;
+  width: min(60vw, 520px);
+  outline: none;
+}
+
+/* Dark/light switch — a box whose glyph morphs sun ⇄ crescent */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.15s ease;
+}
+
+.theme-toggle:hover { background: var(--sidebar-pill-hover); }
+.theme-toggle:active { transform: scale(0.88); }
+
+.theme-toggle-icon {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.theme-toggle-icon::before {
+  content: "☀";
+  font-size: 1.05rem;
+  line-height: 18px;
+}
+
+[data-theme="dark"] .theme-toggle-icon::before { content: "☾"; }
+[data-theme="dark"] .theme-toggle-icon { transform: rotate(360deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle-icon,
+  .theme-toggle,
+  html { transition: none; }
 }
 
 /* ── Mode picker (new-chat empty state) ── */
@@ -279,7 +450,7 @@ body { display: flex; }
 
 /* ── arxiv section ── */
 .arxiv-section {
-  margin-bottom: 1rem;
+  margin: 0 2.5rem 1rem;
   padding: 1rem 1.25rem;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -328,22 +499,29 @@ body { display: flex; }
 }
 
 /* ── Chat area ── */
+/* The chat area is the single scroll container for the conversation, so its
+   scrollbar lands at the far-right viewport edge (not inside the centered
+   column). The input box floats over it. */
 .chat-area {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .chat-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem 0 1rem;
+  width: 100%;
+  /* Slightly wider than the floating input (760px) so messages sit just outside
+     its edges. The big bottom padding clears the floating input box. */
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 0.5rem 1.5rem 8.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 /* ── Messages ── */
@@ -507,28 +685,51 @@ body { display: flex; }
 }
 .msg-assistant pre code { background: none; padding: 0; font-size: 0.8rem; }
 
-/* ── Input row ── */
+/* ── Input row: floats over the scrollable conversation, pinned to the bottom of
+   the chat pane and horizontally centered within it. ── */
 .input-row {
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  z-index: 10;
   display: flex;
-  gap: 0.5rem;
-  padding: 0.85rem 0 1.25rem;
-  border-top: 1px solid var(--border);
+  justify-content: center;
+  padding: 1.5rem 2.5rem 1.1rem;
+  /* Fade so messages scrolling underneath dissolve into the page background. */
+  background: linear-gradient(to top, var(--bg) 62%, transparent);
+  /* Let clicks pass through the transparent fade to messages behind it; the
+     inner box re-enables pointer events. */
+  pointer-events: none;
+  transition: left 0.22s ease;
+}
+
+/* The input box follows the sidebar width without lag while it's being dragged. */
+body.sidebar-resizing .input-row { transition: none; }
+body.sidebar-collapsed .input-row { left: 64px; }
+
+.input-inner {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: 760px;
+  pointer-events: auto;
 }
 
 #chat-input {
   flex: 1;
-  padding: 0.6rem 0.85rem;
+  padding: 0.85rem 3.6rem 0.85rem 1.4rem;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 999px;
   color: var(--text);
   font-family: var(--reading);
-  font-size: 1rem;
+  font-size: 1.05rem;
   resize: none;
   outline: none;
   transition: border-color 0.15s;
-  min-height: 2.4rem;
-  max-height: 8rem;
+  min-height: 2.9rem;
+  max-height: 9rem;
   overflow-y: auto;
 }
 
@@ -537,22 +738,29 @@ body { display: flex; }
 #chat-input:disabled { opacity: 0.4; }
 
 #chat-btn {
-  width: 2.4rem;
-  height: 2.4rem;
+  position: absolute;
+  right: 0.55rem;
+  /* Vertically centered on the textarea's first line (half of the 2.9rem
+     min-height). */
+  top: 1.45rem;
+  transform: translateY(-50%);
+  width: 2.1rem;
+  height: 2.1rem;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--accent);
   border: none;
-  border-radius: var(--radius);
+  border-radius: 50%;
   color: var(--bg);
-  font-size: 1.1rem;
+  font-size: 1rem;
+  line-height: 1;
   cursor: pointer;
   transition: opacity 0.15s, transform 0.1s;
 }
 
-#chat-btn:hover:not(:disabled) { transform: translateY(-1px); }
+#chat-btn:hover:not(:disabled) { transform: translateY(-50%) scale(1.06); }
 #chat-btn:disabled { opacity: 0.35; cursor: default; }
 
 ::-webkit-scrollbar { width: 5px; }
