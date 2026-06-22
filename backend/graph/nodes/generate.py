@@ -230,6 +230,53 @@ async def _emit_citations(parent_sections: list[dict]) -> None:
         )
 
 
+def _emit_media(parent_sections: list[dict]) -> None:
+    """Bake the retrieved tables/figures into the answer as trailing markdown.
+
+    Emitted as token events so they land in the persisted message content and
+    re-render identically on reload. Tables are GFM markdown; figures are images
+    (only the ones with a resolvable url). De-duplicated and capped so we never
+    dump the whole paper. The model is never given the image urls, so it can't
+    hallucinate them — rendering is deterministic from the retrieved chunks.
+    """
+    max_items = int(os.environ.get("MEDIA_MAX_ITEMS", "6"))
+    seen: set[str] = set()
+    rendered: list[str] = []
+
+    for sec in parent_sections:
+        if len(rendered) >= max_items:
+            break
+        ctype = sec.get("content_type")
+        if ctype not in ("table", "figure"):
+            continue
+        title = sec.get("paper_title") or sec.get("paper_id") or ""
+        text = (sec.get("text") or "").strip()
+
+        if ctype == "table":
+            key = f"t:{sec.get('paper_id')}:{hash(text)}"
+            if key in seen or not text:
+                continue
+            seen.add(key)
+            header = f"**Table — {title}**" if title else "**Table**"
+            rendered.append(f"{header}\n\n{text}")
+        else:  # figure
+            url = sec.get("media_url")
+            if not url:
+                continue  # nothing to display without an image
+            key = f"f:{url}"
+            if key in seen:
+                continue
+            seen.add(key)
+            caption = text or "Figure"
+            rendered.append(f"![{caption}]({url})")
+
+    if not rendered:
+        return
+
+    block = "\n\n---\n\n" + "\n\n".join(rendered)
+    emit({"type": "token", "content": block})
+
+
 async def generate_node(state: dict) -> dict:
     generation_model = os.environ.get("GENERATION_MODEL", "llama-3.3-70b-versatile")
     context_budget = int(os.environ.get("GENERATION_MAX_CONTEXT_TOKENS", _DEFAULT_CONTEXT_TOKENS))
@@ -286,6 +333,8 @@ async def generate_node(state: dict) -> dict:
     # Only the grounded research path cites source papers; chat/clarify/general
     # produce no retrieved context and therefore no citations.
     if intent == "research":
+        # Bake any retrieved tables/figures into the answer before citing sources.
+        _emit_media(parent_sections)
         await _emit_citations(parent_sections)
 
     emit({"type": "done"})

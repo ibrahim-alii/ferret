@@ -132,3 +132,58 @@ def test_clarify_and_general_include_history_and_user_message():
         assert messages[0]["role"] == "system"
         assert {"role": "user", "content": "earlier turn"} in messages
         assert messages[-1] == {"role": "user", "content": "Tell me about transformers"}
+
+
+# ---------------------------------------------------------------------------
+# _emit_media: tables/figures baked into the answer as trailing markdown
+# ---------------------------------------------------------------------------
+
+def _capture_media(parent_sections, **env):
+    from backend.graph.nodes.generate import _emit_media
+
+    emitted: list[dict] = []
+    with patch.dict("os.environ", env), \
+         patch("backend.graph.nodes.generate.emit", emitted.append):
+        _emit_media(parent_sections)
+    return "".join(e["content"] for e in emitted if e.get("type") == "token")
+
+
+def test_emit_media_renders_table_markdown_and_figure_image():
+    sections = [
+        {"content_type": "text", "text": "prose", "paper_id": "1", "paper_title": "P"},
+        {"content_type": "table", "text": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+         "paper_id": "1", "paper_title": "Paper One"},
+        {"content_type": "figure", "text": "Figure 2: arch",
+         "media_url": "/media/1/p1-2.png", "paper_id": "1", "paper_title": "Paper One"},
+    ]
+    out = _capture_media(sections)
+    assert "| a | b |" in out               # table markdown preserved
+    assert "Table — Paper One" in out
+    assert "![Figure 2: arch](/media/1/p1-2.png)" in out  # figure as image
+
+
+def test_emit_media_skips_figure_without_url_and_dedupes():
+    sections = [
+        {"content_type": "figure", "text": "no image", "media_url": None, "paper_id": "1"},
+        {"content_type": "table", "text": "| a |\n| --- |\n| 1 |", "paper_id": "1"},
+        {"content_type": "table", "text": "| a |\n| --- |\n| 1 |", "paper_id": "1"},
+    ]
+    out = _capture_media(sections)
+    assert "no image" not in out            # no url -> not rendered
+    assert out.count("| a |") == 1          # duplicate table collapsed
+
+
+def test_emit_media_no_media_emits_nothing():
+    sections = [{"content_type": "text", "text": "just prose", "paper_id": "1"}]
+    out = _capture_media(sections)
+    assert out == ""
+
+
+def test_emit_media_respects_max_items():
+    sections = [
+        {"content_type": "figure", "text": f"f{i}", "media_url": f"/media/1/{i}.png",
+         "paper_id": "1"}
+        for i in range(10)
+    ]
+    out = _capture_media(sections, MEDIA_MAX_ITEMS="3")
+    assert out.count("![") == 3
