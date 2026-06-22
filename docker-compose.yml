@@ -1,0 +1,52 @@
+# Ferret — two single-process containers.
+#
+#   backend  : FastAPI/uvicorn on :8000 (browser connects directly for SSE)
+#   frontend : Express static server on :3000
+#
+# External services (Qdrant Cloud, OpenAI/Gemini, Groq, Jina) are hosted —
+# nothing to run locally. Put their API keys in a .env file next to this file
+# (copy .env.example). Both services read it via env_file.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Secrets + all model/retrieval config come from .env.
+    env_file: .env
+    # Overrides that must hold inside the container regardless of .env:
+    environment:
+      # Bind every interface so the published port works (.env may say 127.0.0.1
+      # for local dev, which would be unreachable from the host in a container).
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      # Allow the frontend's browser origin through CORS.
+      FRONTEND_ORIGIN: http://localhost:3000
+      # Keep data paths inside the mounted volume below.
+      SQLITE_DB_PATH: /app/backend/data/app.db
+      MEDIA_DIR: /app/backend/data/media
+    ports:
+      - "8000:8000"
+    # Persist SQLite db + extracted figure images across rebuilds.
+    volumes:
+      - ferret-data:/app/backend/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3000
+      # Browser-facing backend origin. The browser (not this container) opens
+      # the SSE connection, so this must resolve on the HOST — not an internal
+      # Docker hostname like http://backend:8000.
+      BACKEND_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  ferret-data:

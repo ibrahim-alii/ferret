@@ -1,0 +1,36 @@
+# Keep the backend build context small and secret-free.
+
+# Secrets — never bake into an image layer
+.env
+.env.local
+.env.*.local
+frontend/.env
+
+# Frontend has its own image/build context
+frontend/
+
+# Python caches & build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local data (db, downloaded papers, figures) — recreated at runtime in a volume
+backend/data/
+qdrant_storage/
+evals/reports/
+
+# Tooling / VCS / docs not needed in the image
+.git/
+.gitignore
+.claude/
+tests/
+*.md
+plans/

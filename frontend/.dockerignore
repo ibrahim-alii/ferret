@@ -1,0 +1,7 @@
+# Never copy the host's node_modules (built for the host OS) or local secrets
+# into the image — npm install runs fresh inside the container.
+node_modules/
+.env
+tests/
+vitest.config.js
+coverage/
