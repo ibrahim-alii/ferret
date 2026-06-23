@@ -405,6 +405,41 @@ export function authHeaders(extra = {}) {
   return { 'X-Client-ID': getClientId(), ...extra };
 }
 
+// ─── Per-session unsent draft persistence ────────────────────────────────────
+//
+// Keeps whatever the user has typed but not yet sent, scoped to the chat it was
+// typed in, so closing the tab (or reloading) doesn't lose an in-progress prompt.
+// Stored in localStorage under one key per session; cleared on send. All calls are
+// best-effort (localStorage may be unavailable) and never throw. Exported for testing.
+
+const DRAFT_KEY_PREFIX = 'ferret_draft_';
+
+export function draftKey(sessionId) {
+  return `${DRAFT_KEY_PREFIX}${sessionId}`;
+}
+
+export function saveDraft(sessionId, text) {
+  if (!sessionId) return;
+  try {
+    if (text && text.trim()) localStorage.setItem(draftKey(sessionId), text);
+    else localStorage.removeItem(draftKey(sessionId));
+  } catch { /* ignore */ }
+}
+
+export function loadDraft(sessionId) {
+  if (!sessionId) return '';
+  try {
+    return localStorage.getItem(draftKey(sessionId)) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function clearDraft(sessionId) {
+  if (!sessionId) return;
+  try { localStorage.removeItem(draftKey(sessionId)); } catch { /* ignore */ }
+}
+
 // ─── SSE stream consumer ──────────────────────────────────────────────────────
 
 /**
@@ -941,6 +976,7 @@ function initApp() {
     });
     scrollBottom({ force: true });
     enableChat(chatInput, chatBtn);
+    restoreDraft();
     refreshSessions();
   }
 
@@ -965,6 +1001,7 @@ function initApp() {
       });
       scrollBottom({ force: true });
       enableChat(chatInput, chatBtn);
+      restoreDraft();
       refreshSessions();
     } catch {
       modePicker.hidden = false;
@@ -1034,6 +1071,7 @@ function initApp() {
           });
           scrollBottom({ force: true });
           enableChat(chatInput, chatBtn);
+          restoreDraft();
           arxivBtn.disabled = false;
           refreshSessions();
         } else if (paper.failed) {
@@ -1076,6 +1114,16 @@ function initApp() {
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
+  // Persist the unsent draft as it's typed, scoped to the active chat, so closing
+  // the tab mid-prompt doesn't lose it (restored on openSession / re-create below).
+  chatInput.addEventListener('input', () => saveDraft(state.sessionId, chatInput.value));
+
+  // Drop the active chat's stored draft into the input. Call after a session is
+  // set and its history is loaded.
+  function restoreDraft() {
+    const draft = loadDraft(state.sessionId);
+    if (draft) chatInput.value = draft;
+  }
 
   async function sendMessage() {
     const text = chatInput.value.trim();
@@ -1087,6 +1135,7 @@ function initApp() {
     activeStreamController = controller;
 
     chatInput.value = '';
+    clearDraft(state.sessionId);
     isSending = true;
     chatBtn.disabled = true;
 
