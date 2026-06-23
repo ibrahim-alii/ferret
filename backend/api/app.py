@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.responses import JSONResponse
 
 from backend.api.limiter import limiter
 from backend.api.routers import papers, sessions
@@ -24,6 +25,40 @@ from backend.db.session import close_db, init_db
 # Comma-separated list of allowed origins for CORS. Falls back to local dev
 # servers when FRONTEND_ORIGIN is unset.
 _DEFAULT_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+
+# Reject request bodies larger than this before they are buffered/parsed. The
+# Pydantic per-field caps only apply after the full body is read, so without this
+# a client could stream an arbitrarily large payload.
+_DEFAULT_MAX_BODY_BYTES = 1024 * 1024  # 1 MiB
+
+
+class BodySizeLimitMiddleware:
+    """Pure-ASGI guard that 413s oversized requests by their Content-Length.
+
+    Implemented at the ASGI layer (not BaseHTTPMiddleware) so it never wraps or
+    buffers the response — the SSE StreamingResponse must stream untouched.
+    """
+
+    def __init__(self, app, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            for name, value in scope.get("headers", []):
+                if name == b"content-length":
+                    try:
+                        length = int(value)
+                    except ValueError:
+                        break
+                    if length > self.max_body_bytes:
+                        response = JSONResponse(
+                            {"detail": "Request body too large"}, status_code=413
+                        )
+                        await response(scope, receive, send)
+                        return
+                    break
+        await self.app(scope, receive, send)
 
 
 def _cors_origins() -> list[str]:
@@ -59,6 +94,9 @@ def create_app() -> FastAPI:
 
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    max_body_bytes = int(os.environ.get("MAX_BODY_BYTES", str(_DEFAULT_MAX_BODY_BYTES)))
+    app.add_middleware(BodySizeLimitMiddleware, max_body_bytes=max_body_bytes)
 
     app.add_middleware(
         CORSMiddleware,

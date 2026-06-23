@@ -92,13 +92,13 @@ async def classify_node(state: dict) -> dict:
         logger.warning("intent classification failed (%s); defaulting to research", exc)
         return {"intent": "research"}
 
-    lowered = answer.strip().lower()
-    if "chat" in lowered:
-        intent = "chat"
-    elif "clarify" in lowered:
-        intent = "clarify"
-    elif "general" in lowered:
-        intent = "general"
+    # The model is told to reply with exactly one label, but it sometimes wraps it
+    # ("CHAT.") or pads it into a sentence. Match the bare label only — a substring
+    # check misroutes wordy replies like "not chat" to the chat intent. Anything that
+    # isn't an exact label falls through to the safe research default.
+    lowered = answer.strip().lower().strip(".!?,'\" ")
+    if lowered in ("chat", "clarify", "general"):
+        intent = lowered
     else:
         intent = "research"
 

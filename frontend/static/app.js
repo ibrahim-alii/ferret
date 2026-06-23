@@ -51,6 +51,27 @@ export function buildMessageEl(role, text) {
   return el;
 }
 
+// Move figure attachments out of the assistant text bubble into a sibling tray
+// rendered below it, so images sit outside the message "text box" (claude.ai
+// style). `bubbleEl` must already be attached to the DOM. Tables stay in place.
+export function hoistFigures(bubbleEl) {
+  if (!bubbleEl || !bubbleEl.parentNode) return;
+  const figs = bubbleEl.querySelectorAll('.msg-figure-attachment');
+  if (!figs.length) return;
+  const tray = document.createElement('div');
+  tray.className = 'msg-figures';
+  figs.forEach((fig) => {
+    const parentP = fig.parentElement;
+    tray.appendChild(fig);
+    // Drop the now-empty <p> the figure was the sole content of.
+    if (parentP && parentP.tagName === 'P'
+        && !parentP.children.length && !parentP.textContent.trim()) {
+      parentP.remove();
+    }
+  });
+  bubbleEl.insertAdjacentElement('afterend', tray);
+}
+
 export function buildInterimEl(text) {
   const el = document.createElement('div');
   el.classList.add('msg', 'msg-interim');
@@ -188,11 +209,16 @@ function renderInline(text) {
     .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
     // Images run before links: `![alt](url)` contains `[alt](url)`, so the link
     // rule would otherwise swallow it. Off-allowlist URLs fall back to alt text.
+    // Rendered as a clickable thumbnail attachment that opens the zoom/pan
+    // lightbox (see setupLightbox); never a bare inline <img>.
     .replace(/!\[([^\]]*)\]\(([^\s)]+)\)/g, (_, alt, url) => {
       const src = resolveImageSrc(url);
-      return src
-        ? `<img class="msg-figure" src="${encodeURI(src)}" alt="${alt}">`
-        : alt;
+      if (!src) return alt;
+      const safe = encodeURI(src);
+      const label = alt || 'Figure';
+      return `<button type="button" class="msg-figure-attachment" data-full-src="${safe}" aria-label="View figure: ${label}">`
+        + `<img class="msg-figure-thumb" src="${safe}" alt="${alt}">`
+        + `<span class="msg-figure-label">${label}</span></button>`;
     })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       (_, label, url) => `<a href="${encodeURI(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`)
@@ -387,7 +413,7 @@ export function authHeaders(extra = {}) {
  * Handles the backend's `error` SSE frame as well as transport failures.
  */
 export async function consumeSSEStream(url, body, callbacks = {}) {
-  const { onToken, onInterim, onCitation, onStatus, onDone, onError } = callbacks;
+  const { onToken, onInterim, onCitation, onStatus, onDone, onError, signal } = callbacks;
 
   let response;
   try {
@@ -395,8 +421,11 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
+    // An intentional abort (session switch / re-send) is not an error to surface.
+    if (err && err.name === 'AbortError') return;
     onError && onError(err);
     return;
   }
@@ -411,40 +440,51 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+      buffer += decoder.decode(value, { stream: true });
 
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop();
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop();
 
-    for (const frame of frames) {
-      const event = parseSSEChunk(frame + '\n\n');
-      if (!event) continue;
+      for (const frame of frames) {
+        const event = parseSSEChunk(frame + '\n\n');
+        if (!event) continue;
 
-      switch (event.type) {
-        case 'token':
-          onToken && onToken(event.payload.content);
-          break;
-        case 'status':
-          onStatus && onStatus(event.payload.content, event.payload.step);
-          break;
-        case 'interim_message':
-          onInterim && onInterim(event.payload.content);
-          break;
-        case 'citation':
-          onCitation && onCitation(event.payload);
-          break;
-        case 'error':
-          onError && onError(new Error(event.payload.message || 'stream error'));
-          return;
-        case 'done':
-          onDone && onDone();
-          return;
+        switch (event.type) {
+          case 'token':
+            onToken && onToken(event.payload.content);
+            break;
+          case 'status':
+            onStatus && onStatus(event.payload.content, event.payload.step);
+            break;
+          case 'interim_message':
+            onInterim && onInterim(event.payload.content);
+            break;
+          case 'citation':
+            onCitation && onCitation(event.payload);
+            break;
+          case 'error': {
+            const streamErr = new Error(event.payload.message || 'stream error');
+            // Carry the server's code (e.g. "rate_limited") so the UI can special-case it.
+            if (event.payload.code) streamErr.code = event.payload.code;
+            onError && onError(streamErr);
+            return;
+          }
+          case 'done':
+            onDone && onDone();
+            return;
+        }
       }
     }
+  } catch (err) {
+    // Aborting the fetch rejects the in-flight read(); that's an intentional cancel.
+    if (err && err.name === 'AbortError') return;
+    onError && onError(err);
+    return;
   }
 
   // Stream closed without a terminal done/error frame (e.g. backend crashed
@@ -479,7 +519,9 @@ export async function submitArxivId(arxivId, { onStatus, onPollStart } = {}) {
  * Exported for testing.
  */
 export async function checkIngestionStatus(arxivId) {
-  const res = await fetch(`${BACKEND}/papers/${arxivId}`, { headers: authHeaders() });
+  // Encode the id: old-style arXiv ids carry a slash (hep-th/9901001) that would
+  // otherwise be read as an extra path segment and 404.
+  const res = await fetch(`${BACKEND}/papers/${encodeURIComponent(arxivId)}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`GET /papers/${arxivId} → ${res.status}`);
   const paper = await res.json();
   const status = paper.ingestion_status;
@@ -548,6 +590,111 @@ async function apiPost(path, body) {
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {
   initApp();
+  setupLightbox();
+}
+
+// ─── Image lightbox: full-screen zoom + pan viewer for figure attachments ─────
+//
+// Click delegation on the document opens any `.msg-figure-attachment` (works for
+// both streamed and reloaded messages). The overlay is built lazily on first use.
+function setupLightbox() {
+  if (typeof document === 'undefined') return;
+
+  let overlay = null;
+  let imgEl = null;
+  let captionEl = null;
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+
+  const apply = () => {
+    imgEl.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  };
+  const reset = () => { scale = 1; tx = 0; ty = 0; apply(); };
+  const zoom = (factor) => {
+    scale = Math.min(8, Math.max(1, scale * factor));
+    if (scale === 1) { tx = 0; ty = 0; }
+    apply();
+  };
+  const close = () => {
+    overlay.classList.remove('open');
+    document.body.classList.remove('lightbox-active');
+  };
+
+  const build = () => {
+    overlay = document.createElement('div');
+    overlay.className = 'lightbox-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.innerHTML = `
+      <button type="button" class="lightbox-close" aria-label="Close image viewer">&times;</button>
+      <div class="lightbox-stage"><img class="lightbox-img" alt=""></div>
+      <p class="lightbox-caption"></p>
+      <div class="lightbox-controls">
+        <button type="button" class="lightbox-zoom-out" aria-label="Zoom out">&minus;</button>
+        <button type="button" class="lightbox-reset" aria-label="Reset zoom">Reset</button>
+        <button type="button" class="lightbox-zoom-in" aria-label="Zoom in">+</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    imgEl = overlay.querySelector('.lightbox-img');
+    captionEl = overlay.querySelector('.lightbox-caption');
+    const stage = overlay.querySelector('.lightbox-stage');
+
+    overlay.querySelector('.lightbox-close').addEventListener('click', close);
+    overlay.querySelector('.lightbox-zoom-in').addEventListener('click', () => zoom(1.25));
+    overlay.querySelector('.lightbox-zoom-out').addEventListener('click', () => zoom(0.8));
+    overlay.querySelector('.lightbox-reset').addEventListener('click', reset);
+    // Click on the dark backdrop (not the image/controls) closes.
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      zoom(e.deltaY < 0 ? 1.15 : 0.87);
+    }, { passive: false });
+
+    imgEl.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      startX = e.clientX - tx;
+      startY = e.clientY - ty;
+      imgEl.setPointerCapture(e.pointerId);
+      imgEl.classList.add('dragging');
+    });
+    imgEl.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      tx = e.clientX - startX;
+      ty = e.clientY - startY;
+      apply();
+    });
+    const endDrag = () => { dragging = false; imgEl.classList.remove('dragging'); };
+    imgEl.addEventListener('pointerup', endDrag);
+    imgEl.addEventListener('pointercancel', endDrag);
+
+    document.addEventListener('keydown', (e) => {
+      if (overlay.classList.contains('open') && e.key === 'Escape') close();
+    });
+  };
+
+  const open = (src, caption) => {
+    if (!src) return;
+    if (!overlay) build();
+    reset();
+    imgEl.src = src;
+    imgEl.alt = caption || '';
+    captionEl.textContent = caption || '';
+    captionEl.style.display = caption ? '' : 'none';
+    overlay.classList.add('open');
+    document.body.classList.add('lightbox-active');
+  };
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.msg-figure-attachment');
+    if (!btn) return;
+    const img = btn.querySelector('img');
+    open(btn.getAttribute('data-full-src'), img ? img.getAttribute('alt') : '');
+  });
 }
 
 function initApp() {
@@ -779,6 +926,7 @@ function initApp() {
   }
 
   async function openSession(summary) {
+    abortActiveStream();  // switching away cancels any in-flight generation
     modePicker.hidden = true;
     state.setMode(summary.mode);
     setChatHeader(summary.mode, summary.title);
@@ -789,7 +937,7 @@ function initApp() {
     state.setSession(summary.session_id);
     chatList.innerHTML = '';
     await loadSessionHistory(state.sessionId, (msg) => {
-      chatList.appendChild(buildMessageEl(msg.role, msg.content));
+      { const _m = buildMessageEl(msg.role, msg.content); chatList.appendChild(_m); hoistFigures(_m); }
     });
     scrollBottom({ force: true });
     enableChat(chatInput, chatBtn);
@@ -800,6 +948,7 @@ function initApp() {
   newChatBtn.addEventListener('click', () => showModePicker());
 
   pickAsk.addEventListener('click', async () => {
+    abortActiveStream();  // starting a new chat cancels any in-flight generation
     state.setMode('ask');
     setModeBadge('ask');
     modePicker.hidden = true;
@@ -812,7 +961,7 @@ function initApp() {
       const data = await apiPost('/sessions', { mode: 'ask' });
       state.setSession(data.session_id);
       await loadSessionHistory(state.sessionId, (msg) => {
-        chatList.appendChild(buildMessageEl(msg.role, msg.content));
+        { const _m = buildMessageEl(msg.role, msg.content); chatList.appendChild(_m); hoistFigures(_m); }
       });
       scrollBottom({ force: true });
       enableChat(chatInput, chatBtn);
@@ -825,6 +974,7 @@ function initApp() {
   });
 
   pickDeep.addEventListener('click', () => {
+    abortActiveStream();  // starting a new chat cancels any in-flight generation
     state.setMode('deep_dive');
     setModeBadge('deep_dive');
     modePicker.hidden = true;
@@ -880,7 +1030,7 @@ function initApp() {
           });
           state.setSession(sess.session_id);
           await loadSessionHistory(state.sessionId, (msg) => {
-            chatList.appendChild(buildMessageEl(msg.role, msg.content));
+            { const _m = buildMessageEl(msg.role, msg.content); chatList.appendChild(_m); hoistFigures(_m); }
           });
           scrollBottom({ force: true });
           enableChat(chatInput, chatBtn);
@@ -910,6 +1060,17 @@ function initApp() {
   // While a response streams, the textarea stays editable (so the user can draft
   // their next question) but the send button is locked and re-sends are blocked.
   let isSending = false;
+  // Tracks the in-flight SSE generation so switching sessions can abort it (and
+  // free the wedged isSending lock) instead of orphaning the backend stream.
+  let activeStreamController = null;
+  function abortActiveStream() {
+    if (activeStreamController) {
+      activeStreamController.abort();
+      activeStreamController = null;
+      isSending = false;
+      chatBtn.disabled = false;
+    }
+  }
 
   chatBtn.addEventListener('click', () => sendMessage());
   chatInput.addEventListener('keydown', (e) => {
@@ -919,6 +1080,11 @@ function initApp() {
   async function sendMessage() {
     const text = chatInput.value.trim();
     if (!text || !state.sessionId || isSending) return;
+
+    // A new send supersedes any still-streaming previous one.
+    abortActiveStream();
+    const controller = new AbortController();
+    activeStreamController = controller;
 
     chatInput.value = '';
     isSending = true;
@@ -954,6 +1120,7 @@ function initApp() {
       `${BACKEND}/sessions/${state.sessionId}/messages`,
       { content: text },
       {
+        signal: controller.signal,
         onStatus:  (t, step) => {
           if (step === 'chatting') { isChat = true; return; }
           if (isChat) return;
@@ -969,25 +1136,35 @@ function initApp() {
         },
         onCitation:(c) => { completeOnce(); citationContainer.appendChild(buildCitationEl(c)); scrollBottom(); },
         onDone:    ()  => {},
-        onError:   ()  => {
+        onError:   (err)  => {
           errored = true;
           if (thinking.el.isConnected) thinking.el.remove();
-          assistantEl.textContent = '[Error — please try again]';
+          assistantEl.textContent = err && err.code === 'rate_limited'
+            ? '[Rate-limited — please wait a moment and try again]'
+            : '[Error — please try again]';
           assistantEl.classList.add('msg-error');
-          isSending = false;
-          chatBtn.disabled = false;
         },
       }
     );
 
-    if (!errored) {
-      await typewriter.finish();
-      // The typewriter streamed raw markdown as plain text; now render it formatted.
-      assistantEl.innerHTML = renderMarkdown(assistantEl.textContent);
-      completeOnce();
-      isSending = false;
-      chatBtn.disabled = false;
-      refreshSessions();
+    // Superseded by a newer send or a session switch: the new owner controls the UI.
+    if (controller.signal.aborted) return;
+
+    try {
+      if (!errored) {
+        await typewriter.finish();
+        // The typewriter streamed raw markdown as plain text; now render it formatted.
+        assistantEl.innerHTML = renderMarkdown(assistantEl.textContent);
+        hoistFigures(assistantEl);
+        completeOnce();
+        refreshSessions();
+      }
+    } finally {
+      if (activeStreamController === controller) {
+        activeStreamController = null;
+        isSending = false;
+        chatBtn.disabled = false;
+      }
     }
   }
 

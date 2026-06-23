@@ -48,7 +48,9 @@ async def post_paper(
 
 
 @router.get("/{arxiv_id}", response_model=PaperStatusResponse)
+@limiter.limit("60/minute")
 async def get_paper(
+    request: Request,
     arxiv_id: str,
     db: AsyncSession = Depends(get_session),
 ) -> PaperStatusResponse:

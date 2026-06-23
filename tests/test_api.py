@@ -560,6 +560,114 @@ async def test_sse_connection_handles_client_disconnect_gracefully(client):
 
 
 # ---------------------------------------------------------------------------
+# Body-size limit (#4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_oversized_request_body_rejected_with_413(client):
+    # The Pydantic 8000-char cap only applies after the body is fully parsed; the
+    # middleware must reject an oversized body up front.
+    big = "x" * (1024 * 1024 + 100)  # just over 1 MiB
+    resp = await client.post("/papers", json={"arxiv_id": big})
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_normal_body_passes_size_check(client):
+    # A modest body must still be routed (and then 422 on arxiv validation), proving
+    # the middleware passes through rather than blanket-rejecting.
+    resp = await client.post("/papers", json={"arxiv_id": "not a valid id"})
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting coverage (#6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_is_rate_limited(client):
+    """The read endpoints carry a limit too, not just the two write endpoints."""
+    from backend.api.limiter import limiter
+
+    limiter.enabled = True
+    try:
+        statuses = []
+        for _ in range(70):  # GET /sessions limit is 60/minute
+            r = await client.get("/sessions", headers={"X-Client-ID": "rl-test"})
+            statuses.append(r.status_code)
+            if r.status_code == 429:
+                break
+        assert 429 in statuses
+    finally:
+        limiter.enabled = False
+
+
+# ---------------------------------------------------------------------------
+# LLM-failure persistence + 429 handling (#8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_message_persists_assistant_placeholder_on_failure(
+    client, session_factory
+):
+    """A graph failure must not leave a dangling user question with no reply on reload."""
+    from sqlalchemy import select
+
+    from backend.db.models import Message
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("graph exploded")
+        yield  # pragma: no cover — make this an async generator
+
+    resp = await client.post("/sessions", json={"mode": "ask"})
+    sid = resp.json()["session_id"]
+
+    with patch("backend.api.routers.sessions.astream_chat", side_effect=boom):
+        async with client.stream(
+            "POST", f"/sessions/{sid}/messages", json={"content": "hi"}
+        ) as r:
+            events = await collect_sse(r)
+
+    assert any(e["event"] == "error" for e in events)
+
+    async with session_factory() as db:
+        result = await db.execute(
+            select(Message).where(Message.session_id == sid).order_by(Message.created_at)
+        )
+        msgs = result.scalars().all()
+
+    roles = [m.role for m in msgs]
+    assert roles == ["user", "assistant"]  # placeholder persisted alongside the question
+
+
+@pytest.mark.asyncio
+async def test_post_message_rate_limit_failure_tags_error_frame(client):
+    """A 429 from the LLM is surfaced with a distinct code so the UI can special-case it."""
+
+    class FakeRateLimit(Exception):
+        status_code = 429
+
+    async def rate_limited(*args, **kwargs):
+        raise FakeRateLimit("slow down")
+        yield  # pragma: no cover
+
+    resp = await client.post("/sessions", json={"mode": "ask"})
+    sid = resp.json()["session_id"]
+
+    with patch("backend.api.routers.sessions.astream_chat", side_effect=rate_limited):
+        async with client.stream(
+            "POST", f"/sessions/{sid}/messages", json={"content": "hi"}
+        ) as r:
+            events = await collect_sse(r)
+
+    error = next(e for e in events if e["event"] == "error")
+    assert error["data"]["code"] == "rate_limited"
+
+
+# ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
 

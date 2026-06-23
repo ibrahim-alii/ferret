@@ -23,6 +23,8 @@ backend/data/*.db
 backend/data/*.pdf
 backend/data/*.html
 backend/data/*.xml
+# Figure images extracted from PDF-only papers (served at /media)
+backend/data/media/
 
 # Qdrant local (if ever used)
 qdrant_storage/

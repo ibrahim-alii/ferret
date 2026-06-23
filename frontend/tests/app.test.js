@@ -17,6 +17,7 @@ import {
   loadSessions,
   createTypewriter,
   renderMarkdown,
+  hoistFigures,
 } from '../static/app.js';
 
 // ─── SSE frame parsing ────────────────────────────────────────────────────────
@@ -191,18 +192,21 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<table>');
   });
 
-  it('renders an allowlisted arxiv.org image', () => {
+  it('renders an allowlisted arxiv.org image as a clickable attachment', () => {
     const html = renderMarkdown('![x](https://arxiv.org/html/2301.00001/x1.png)');
+    expect(html).toContain('class="msg-figure-attachment"');
+    expect(html).toContain('data-full-src="https://arxiv.org/html/2301.00001/x1.png"');
     expect(html).toContain('<img');
     expect(html).toContain('src="https://arxiv.org/html/2301.00001/x1.png"');
     expect(html).toContain('alt="x"');
   });
 
-  it('prefixes /media images with the backend origin', () => {
+  it('prefixes /media image attachments with the backend origin', () => {
     window.__BACKEND_URL__ = 'http://localhost:8000';
     try {
       const html = renderMarkdown('![x](/media/2301/p1-5.png)');
-      expect(html).toContain('<img');
+      expect(html).toContain('class="msg-figure-attachment"');
+      expect(html).toContain('data-full-src="http://localhost:8000/media/2301/p1-5.png"');
       expect(html).toContain('src="http://localhost:8000/media/2301/p1-5.png"');
     } finally {
       delete window.__BACKEND_URL__;
@@ -217,6 +221,36 @@ describe('renderMarkdown', () => {
     const data = renderMarkdown('![x](data:image/png;base64,AAAA)');
     expect(data).not.toContain('<img');
     expect(data).toContain('x');
+  });
+});
+
+describe('hoistFigures', () => {
+  it('moves figure attachments into a sibling tray outside the bubble', () => {
+    const bubble = buildMessageEl(
+      'assistant',
+      'Some text.\n\n![Fig 1](https://arxiv.org/html/1/x1.png)',
+    );
+    document.body.appendChild(bubble);
+    hoistFigures(bubble);
+
+    // The attachment is no longer inside the text bubble...
+    expect(bubble.querySelector('.msg-figure-attachment')).toBeNull();
+    // ...it lives in a .msg-figures tray rendered right after the bubble.
+    const tray = bubble.nextElementSibling;
+    expect(tray.className).toBe('msg-figures');
+    expect(tray.querySelectorAll('.msg-figure-attachment').length).toBe(1);
+    // Prose stays in the bubble.
+    expect(bubble.textContent).toContain('Some text.');
+    bubble.remove();
+    tray.remove();
+  });
+
+  it('is a no-op when the message has no figures', () => {
+    const bubble = buildMessageEl('assistant', 'Just text, no images.');
+    document.body.appendChild(bubble);
+    hoistFigures(bubble);
+    expect(bubble.nextElementSibling).toBeNull();
+    bubble.remove();
   });
 });
 
@@ -372,6 +406,21 @@ describe('checkIngestionStatus (exported helper)', () => {
     const result = await checkIngestionStatus('2301.00001');
     expect(result.ready).toBe(false);
     expect(result.failed).toBe(false);
+  });
+
+  it('encodes old-style arxiv ids in the request path', async () => {
+    const { checkIngestionStatus } = await import('../static/app.js');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ingestion_status: 'full', arxiv_id: 'hep-th/9901001' }),
+    });
+
+    await checkIngestionStatus('hep-th/9901001');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('hep-th%2F9901001'),
+      expect.anything()
+    );
   });
 
   it('returns failed=true for failed status', async () => {
@@ -552,6 +601,58 @@ describe('consumeSSEStream', () => {
     const onError = vi.fn();
     await consumeSSEStream('/sessions/s1/messages', {}, { onError });
     expect(onError).toHaveBeenCalled();
+  });
+
+  it('propagates the code from an error frame so the UI can special-case 429', async () => {
+    const chunks = [
+      'event: error\ndata: {"message":"The assistant is rate-limited right now.","code":"rate_limited"}\n\n',
+    ];
+    let chunkIdx = 0;
+    const mockReader = {
+      read: vi.fn().mockImplementation(async () => {
+        if (chunkIdx < chunks.length) {
+          return { done: false, value: new TextEncoder().encode(chunks[chunkIdx++]) };
+        }
+        return { done: true, value: undefined };
+      }),
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => mockReader } });
+
+    let received;
+    await consumeSSEStream('/sessions/s1/messages', {}, { onError: (e) => { received = e; } });
+    expect(received.code).toBe('rate_limited');
+    expect(received.message).toContain('rate-limited');
+  });
+
+  it('forwards an abort signal to fetch when provided', async () => {
+    const controller = new AbortController();
+    const mockReader = { read: vi.fn().mockResolvedValue({ done: true, value: undefined }) };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => mockReader } });
+
+    await consumeSSEStream('/sessions/s1/messages', {}, { signal: controller.signal, onError: vi.fn() });
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/sessions/s1/messages',
+      expect.objectContaining({ signal: controller.signal })
+    );
+  });
+
+  it('stays silent (no onError) when the fetch is aborted', async () => {
+    const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    global.fetch = vi.fn().mockRejectedValue(abortErr);
+
+    const onError = vi.fn();
+    await consumeSSEStream('/sessions/s1/messages', {}, { onError });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('stays silent (no onError) when the stream read is aborted mid-flight', async () => {
+    const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const mockReader = { read: vi.fn().mockRejectedValue(abortErr) };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => mockReader } });
+
+    const onError = vi.fn();
+    await consumeSSEStream('/sessions/s1/messages', {}, { onError });
+    expect(onError).not.toHaveBeenCalled();
   });
 });
 

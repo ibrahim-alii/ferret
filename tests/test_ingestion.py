@@ -350,6 +350,22 @@ class TestParser:
         prose = " ".join(b.text for b in blocks if b.content_type == "text")
         assert "0.91" not in prose
 
+    def test_html_strips_mathml_tex_annotation(self):
+        """MathML <annotation> TeX source must not leak into cell/prose text."""
+        from backend.ingestion.parser import parse
+
+        html = (
+            "<section><h2>Results</h2><table>"
+            "<tr><th>Memory <math><semantics><mo>&#8595;</mo>"
+            '<annotation encoding="application/x-tex">\\downarrow</annotation>'
+            "</semantics></math></th></tr>"
+            "<tr><td>2.08</td></tr></table></section>"
+        )
+        blocks = parse(html_content=html, pdf_bytes=None, arxiv_id="2301.00001")
+        text = " ".join(b.text for b in blocks)
+        assert "\\downarrow" not in text
+        assert "↓" in text  # rendered glyph is kept
+
     def test_html_figure_emits_caption_and_absolute_image_url(self):
         from backend.ingestion.parser import parse
 
@@ -375,6 +391,15 @@ class TestParser:
 
         assert ".." not in _safe_id("../../etc/passwd")
         assert _safe_id("hep-th/9901001") == "hep-th/9901001"  # legit old-style id kept
+
+    def test_safe_id_strips_leading_and_trailing_slash(self):
+        from backend.ingestion.parser import _safe_id
+
+        # A leading slash would make `_media_dir() / safe_id` an absolute path that
+        # escapes MEDIA_DIR; strip it while keeping the internal old-style slash.
+        assert not _safe_id("/etc/passwd").startswith("/")
+        assert not _safe_id("hep-th/9901001/").endswith("/")
+        assert _safe_id("hep-th/9901001") == "hep-th/9901001"
 
     def test_parse_failure_falls_back_to_abstract_only(self):
         from backend.ingestion.parser import parse

@@ -27,10 +27,21 @@ _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9._/-]")
 # Image extensions PyMuPDF may report; anything else is coerced to png so a crafted
 # PDF can't smuggle path separators through extract_image()'s ext field.
 _ALLOWED_IMG_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+# PDF figure capture: render scale (~216 DPI, crisp vector labels), how far above
+# the caption a figure may extend, and how far above the rasters to pull in labels.
+_FIGURE_RENDER_ZOOM = 3.0
+_MAX_FIGURE_HEIGHT = 460.0
+_FIGURE_LABEL_PAD = 20.0
+# Caption continuation: lines within this vertical gap (points) of the previous
+# caption line belong to the same caption; a larger gap ends it.
+_CAPTION_LINE_GAP = 14.0
+_CAPTION_MAX_LINES = 8
 
 
 def _safe_id(arxiv_id: str) -> str:
-    return _SAFE_ID_RE.sub("", arxiv_id).replace("..", "")
+    # Strip leading/trailing slashes too: a leading slash makes `_media_dir() / id`
+    # an absolute path that escapes MEDIA_DIR (pathlib resets on an absolute rhs).
+    return _SAFE_ID_RE.sub("", arxiv_id).replace("..", "").strip("/")
 
 
 def _media_dir() -> Path:
@@ -82,6 +93,12 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html_content, "lxml")
+    # arXiv HTML renders math as MathML that carries the raw TeX in an
+    # <annotation encoding="application/x-tex"> sibling of the rendered glyph.
+    # get_text() would otherwise emit both (e.g. "↓ \downarrow") and leak the
+    # macro into prose and table cells, so drop the annotation source up front.
+    for ann in soup.find_all("annotation"):
+        ann.decompose()
     base = f"https://arxiv.org/html/{_safe_id(arxiv_id)}/"
     blocks: list[ParsedBlock] = []
 
@@ -137,47 +154,78 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
 
 
 def _extract_pdf_image(doc, page, caption_bbox, arxiv_id: str) -> str | None:
-    """Extract the image nearest a figure caption on this page and save it.
+    """Render the figure region above a caption to an image and save it.
 
-    Returns a "/media/<arxiv_id>/<file>" url, or None if no image is found.
-    Heuristic: the figure image is the one whose bbox is closest (vertically) to
-    the caption, which on arXiv PDFs sits just below the figure.
+    Returns a "/media/<arxiv_id>/<file>" url, or None if no figure is found.
+
+    arXiv figures are usually a raster on a transparent canvas PLUS vector text
+    drawn on the page (column headers, row/axis labels). extract_image() would
+    grab only the raster — missing the labels, compositing transparency to black,
+    and ignoring sibling raster fragments. So we rasterise the page region instead:
+    the union of the image bboxes just above the caption, grown to include the
+    surrounding label text, clamped to stop just above the caption. This captures
+    the figure exactly as it appears in the paper (on the white page background).
     """
     import fitz
+
+    cap_top = fitz.Rect(caption_bbox).y0
 
     try:
         infos = page.get_image_info(xrefs=True)
     except Exception:
         return None
-    candidates = [i for i in infos if i.get("xref")]
-    if not candidates:
+    img_rects = [
+        fitz.Rect(i["bbox"])
+        for i in infos
+        if i.get("bbox") and 0 < (cap_top - fitz.Rect(i["bbox"]).y1) < _MAX_FIGURE_HEIGHT
+    ]
+    if not img_rects:
         return None
 
-    cap = fitz.Rect(caption_bbox)
-    cap_top = cap.y0
+    # Union the raster pieces belonging to this figure.
+    region = fitz.Rect(img_rects[0])
+    for r in img_rects[1:]:
+        region |= r
 
-    def gap(info) -> float:
-        bbox = fitz.Rect(info["bbox"])
-        # Prefer images sitting above the caption; penalise distance.
-        return abs(cap_top - bbox.y1)
-
-    best = min(candidates, key=gap)
-    xref = best["xref"]
+    # Grow to include label text sitting in the figure band (headers just above,
+    # row/axis labels beside the rasters), but never below the caption.
+    band_top = region.y0 - _FIGURE_LABEL_PAD
     try:
-        extracted = doc.extract_image(xref)
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                lr = fitz.Rect(line["bbox"])
+                if lr.y0 >= band_top and lr.y1 <= cap_top - 1:
+                    region |= lr
+    except Exception:
+        pass
+
+    region.y1 = min(region.y1, cap_top - 2)
+    region += (-4, -4, 4, 4)  # small padding
+    region &= page.rect
+    if region.is_empty or region.width < 8 or region.height < 8:
+        return None
+
+    try:
+        zoom = fitz.Matrix(_FIGURE_RENDER_ZOOM, _FIGURE_RENDER_ZOOM)
+        data = page.get_pixmap(clip=region, matrix=zoom).tobytes("png")
     except Exception:
         return None
-    if not extracted or not extracted.get("image"):
+    if not data:
         return None
 
-    ext = str(extracted.get("ext", "png")).lower()
-    if ext not in _ALLOWED_IMG_EXTS:
-        ext = "png"
     safe_id = _safe_id(arxiv_id)
-    out_dir = _media_dir() / safe_id
+    media_root = _media_dir()
+    out_dir = (media_root / safe_id).resolve()
+    # Defense-in-depth: never write outside MEDIA_DIR even if a crafted id slips past
+    # the regex/strip above.
+    if not out_dir.is_relative_to(media_root):
+        log.warning("Rejected media path outside MEDIA_DIR for arxiv_id=%r", arxiv_id)
+        return None
     out_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"p{page.number}-{xref}.{ext}"
-    (out_dir / fname).write_bytes(extracted["image"])
+    fname = f"p{page.number}-{int(region.x0)}-{int(region.y0)}.png"
+    (out_dir / fname).write_bytes(data)
     return f"/media/{safe_id}/{fname}"
 
 
@@ -209,6 +257,9 @@ def _parse_pdf(pdf_bytes: bytes, arxiv_id: str) -> list[ParsedBlock]:
             except Exception as exc:
                 log.debug("PDF table extraction failed on page %s: %s", page.number, exc)
 
+            # Flatten the page's text lines so a multi-line figure caption can be
+            # gathered with a forward look (captions wrap across several lines).
+            page_lines: list[tuple[str, dict, list]] = []
             for block in page.get_text("dict")["blocks"]:
                 if block.get("type") != 0:
                     continue
@@ -216,29 +267,49 @@ def _parse_pdf(pdf_bytes: bytes, arxiv_id: str) -> list[ParsedBlock]:
                     spans = line.get("spans", [])
                     if not spans:
                         continue
-                    line_text = " ".join(s["text"] for s in spans).strip()
-                    if not line_text:
-                        continue
+                    text = " ".join(s["text"] for s in spans).strip()
+                    if text:
+                        page_lines.append((text, line, spans))
 
-                    line_rect = fitz.Rect(line["bbox"])
-                    if any(r.intersects(line_rect) for r in table_rects):
-                        continue  # already captured as a markdown table
+            i = 0
+            while i < len(page_lines):
+                line_text, line, spans = page_lines[i]
+                line_rect = fitz.Rect(line["bbox"])
+                if any(r.intersects(line_rect) for r in table_rects):
+                    i += 1
+                    continue  # already captured as a markdown table
 
-                    if _FIGURE_CAPTION_RE.match(line_text):
-                        url = _extract_pdf_image(doc, page, line["bbox"], arxiv_id)
-                        section = current_section or "Figure"
-                        blocks.append(
-                            ParsedBlock(section, line_text, "figure", media_url=url)
-                        )
-                        continue
+                if _FIGURE_CAPTION_RE.match(line_text):
+                    # Gather the full caption: subsequent tightly-spaced lines until
+                    # a paragraph break or the next figure caption.
+                    parts = [line_text]
+                    prev = line_rect
+                    j = i + 1
+                    while j < len(page_lines) and len(parts) < _CAPTION_MAX_LINES:
+                        nxt_text, nxt_line, _ = page_lines[j]
+                        nxt_rect = fitz.Rect(nxt_line["bbox"])
+                        if _FIGURE_CAPTION_RE.match(nxt_text):
+                            break
+                        if nxt_rect.y0 - prev.y1 > _CAPTION_LINE_GAP:
+                            break
+                        parts.append(nxt_text)
+                        prev = nxt_rect
+                        j += 1
+                    caption = re.sub(r"\s+", " ", " ".join(parts)).strip()
+                    url = _extract_pdf_image(doc, page, line["bbox"], arxiv_id)
+                    section = current_section or "Figure"
+                    blocks.append(ParsedBlock(section, caption, "figure", media_url=url))
+                    i = j
+                    continue
 
-                    max_size = max(s["size"] for s in spans)
-                    is_bold = any(s["flags"] & 2**4 for s in spans)
-                    if (max_size >= 13 or is_bold) and len(line_text) < 120:
-                        flush_text()
-                        current_section = line_text
-                    else:
-                        current_lines.append(line_text)
+                max_size = max(s["size"] for s in spans)
+                is_bold = any(s["flags"] & 2**4 for s in spans)
+                if (max_size >= 13 or is_bold) and len(line_text) < 120:
+                    flush_text()
+                    current_section = line_text
+                else:
+                    current_lines.append(line_text)
+                i += 1
 
     if current_section is not None and current_lines:
         blocks.append(ParsedBlock(current_section, " ".join(current_lines), "text"))

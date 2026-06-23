@@ -79,7 +79,9 @@ async def _generate_session_title(user_message: str, assistant_answer: str) -> s
 
 
 @router.get("", response_model=list[SessionSummary])
+@limiter.limit("60/minute")
 async def list_sessions(
+    request: Request,
     db: AsyncSession = Depends(get_session),
     x_client_id: str | None = Header(default=None),
 ) -> list[SessionSummary]:
@@ -119,7 +121,9 @@ async def list_sessions(
 
 
 @router.post("", status_code=201, response_model=PostSessionResponse)
+@limiter.limit("20/minute")
 async def post_session(
+    request: Request,
     body: PostSessionRequest,
     db: AsyncSession = Depends(get_session),
     x_client_id: str | None = Header(default=None),
@@ -140,7 +144,9 @@ async def post_session(
 
 
 @router.patch("/{session_id}", response_model=SessionSummary)
+@limiter.limit("20/minute")
 async def rename_session(
+    request: Request,
     session_id: str,
     body: PatchSessionRequest,
     db: AsyncSession = Depends(get_session),
@@ -310,13 +316,42 @@ async def _stream(
     except GeneratorExit:
         logger.info("SSE client disconnected for session %s", session.session_id)
         await db.rollback()
-    except Exception:
+    except Exception as exc:
         # Any failure inside the graph (LLM/embeddings/rate limits, Qdrant, etc.)
         # would otherwise close the stream with no output, leaving the client
         # hanging. Surface it as an error frame and roll back the open transaction.
         logger.exception("SSE stream failed for session %s", session.session_id)
         await db.rollback()
-        yield _sse("error", {"message": "The assistant ran into an error. Please try again."})
+
+        # Rate limits are common on Groq's free tier; tag them so the UI can show a
+        # "try again in a moment" hint rather than a generic error.
+        is_rate_limit = getattr(exc, "status_code", None) == 429
+        if is_rate_limit:
+            message = "The assistant is rate-limited right now. Please wait a moment and try again."
+            code = "rate_limited"
+        else:
+            message = "The assistant ran into an error. Please try again."
+            code = "error"
+
+        # The user message was already committed before streaming began. Persist an
+        # assistant placeholder so a reload shows the error instead of a dangling
+        # question with no reply. Best-effort: never mask the original failure.
+        try:
+            db.add(
+                Message(
+                    session_id=session.session_id,
+                    role="assistant",
+                    content=f"⚠️ {message}",
+                )
+            )
+            await db.commit()
+        except Exception:
+            logger.exception(
+                "Failed to persist error placeholder for session %s", session.session_id
+            )
+            await db.rollback()
+
+        yield _sse("error", {"message": message, "code": code})
 
 
 def _sse(event: str, data: dict) -> str:
@@ -324,7 +359,9 @@ def _sse(event: str, data: dict) -> str:
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageResponse])
+@limiter.limit("60/minute")
 async def get_messages(
+    request: Request,
     session_id: str,
     db: AsyncSession = Depends(get_session),
     x_client_id: str | None = Header(default=None),

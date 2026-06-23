@@ -1036,6 +1036,34 @@ async def test_classify_node_research_question_uses_llm(monkeypatch):
     assert result == {"intent": "research"}
 
 
+@pytest.mark.asyncio
+async def test_classify_node_ignores_chat_substring_in_wordy_answer(monkeypatch):
+    # A wordy classifier reply that merely mentions "chat" must not be misrouted to
+    # the chat intent: only an exact one-word label counts.
+    import backend.graph.nodes.classify as classify_mod
+
+    async def _wordy(*a, **k):
+        return "This is clearly a research question, not chat."
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _wordy)
+    result = await classify_mod.classify_node(
+        {"user_message": "Compare the two retrieval papers"}
+    )
+    assert result == {"intent": "research"}
+
+
+@pytest.mark.asyncio
+async def test_classify_node_exact_label_with_trailing_punctuation(monkeypatch):
+    import backend.graph.nodes.classify as classify_mod
+
+    async def _chat(*a, **k):
+        return "CHAT."
+
+    monkeypatch.setattr(classify_mod, "groq_complete", _chat)
+    result = await classify_mod.classify_node({"user_message": "thanks so much"})
+    assert result == {"intent": "chat"}
+
+
 def _one_chunk_stream():
     chunk = MagicMock()
     chunk.choices = [MagicMock()]
