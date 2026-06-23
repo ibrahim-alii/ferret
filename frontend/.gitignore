@@ -1,3 +1,9 @@
 node_modules/
 .env
 coverage/
+
+# Playwright generated output (config + tests/e2e are committed)
+playwright-report/
+playwright-artifacts/
+test-results/
+.playwright/
