@@ -1,241 +1,175 @@
-# Ferret
+<!-- LOGO PLACEHOLDER — swap docs/logo.svg for the real logo (e.g. docs/logo.png) when ready -->
+<p align="center">
+  <img src="docs/logo.svg" alt="ferret logo" width="160" />
+</p>
 
-> ArXiv RAG chatbot with two chat modes — **Deep Dive** (single paper, strict grounding) and **Ask** (cross-corpus, grows over time) — built on Corrective RAG, hybrid retrieval, and streaming SSE.
+<h1 align="center">ferret</h1>
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![LangGraph](https://img.shields.io/badge/LangGraph-0.2-orange) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+<p align="center">
+  Chat with arXiv research papers. Get answers grounded in real text, not guesses.
+</p>
 
----
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/node-18+-339933?logo=node.js&logoColor=white" alt="Node 18+" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/LangGraph-CRAG-1C3C3C" alt="LangGraph CRAG" />
+  <img src="https://img.shields.io/badge/Qdrant-hybrid%20search-DC244C?logo=qdrant&logoColor=white" alt="Qdrant" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+</p>
 
-## What is Ferret?
-
-**Deep Dive** — enter an arXiv paper ID and chat strictly about that paper. Answers are grounded in the ingested full text; when context is insufficient, the system surfaces related papers to explore instead of hallucinating.
-
-**Ask** — chat freely across every paper ingested so far. When retrieval comes up short, the system searches arXiv, ingests the most relevant candidates on the fly, and retries before answering.
-
-Both modes share the same CRAG backbone: hybrid vector retrieval (dense + sparse with server-side RRF) → rerank → small-to-big context expansion → sufficiency grading → conditional generation, all streamed over SSE.
-
----
-
-## Architecture
-
-See [`docs/architecture.excalidraw`](docs/architecture.excalidraw) for the full interactive diagram (open in [excalidraw.com](https://excalidraw.com) or the VS Code extension).
-
-```
-Browser
-  └─ Express frontend (vanilla JS, SSE consumer)
-       └─ FastAPI backend
-            ├─ Ingestion Graph (LangGraph)
-            │    └─ arXiv API → HTML/PDF parser → filter → chunk
-            │         → OpenAI/Gemini embed → Qdrant upsert + SQLite write
-            └─ CRAG Chat Graph (LangGraph)
-                 Retrieve (hybrid RRF)
-                   → Rerank (Jina)
-                     → Expand small-to-big (SQLite)
-                       → Grade (2-threshold + LLM judge)
-                         ├─ sufficient  → Generate (Groq) → SSE stream
-                         └─ insufficient
-                              ├─ Deep Dive: cite related papers (no ingest)
-                              └─ Ask: search arXiv → ingest → re-retrieve → Generate
-```
+<!-- DEMO PLACEHOLDER — swap docs/demo.svg for a Playwright-captured walkthrough (docs/demo.gif) -->
+<p align="center">
+  <img src="docs/demo.svg" alt="ferret demo" width="720" />
+</p>
 
 ---
 
-## Prerequisites
+## Getting Started
 
-| Requirement | Notes |
-|---|---|
-| Python 3.11+ | Backend runtime |
-| Node.js 18+ | Frontend server |
-| [Groq](https://console.groq.com) API key | LLM generation + grading (free tier) |
-| [OpenAI](https://platform.openai.com) (or Gemini) API key | Dense embeddings |
-| [Jina AI](https://jina.ai/reranker) API key | Reranking (free tier) |
-| [Qdrant Cloud](https://cloud.qdrant.io) cluster | Vector store (free tier, 1 GB RAM) |
-
----
-
-## Quick Start
+**Prerequisites:** Python 3.11+, Node.js 18+, and accounts on **Groq**, **Jina AI**, **OpenAI** (or **Gemini**), and **Qdrant Cloud**.
 
 ```bash
 # 1. Clone and enter the repo
-git clone <repo-url> && cd ferret
+git clone https://github.com/ibrahim-alii/ferret && cd ferret
 
-# 2. Copy env template and fill in your API keys
+# 2. Copy the env template and fill in your API keys
 cp .env.example .env
 
-# 3. Install Python package (exposes the `ferret` CLI)
+# 3. Install the Python package (exposes the `ferret` CLI)
 pip install -e ".[dev]"
 
 # 4. Install frontend dependencies
 cd frontend && npm install && cd ..
 
-# 5. Initialise SQLite schema + Qdrant collection (idempotent)
+# 5. Initialize SQLite schema and Qdrant collection
 ferret init
 
 # 6. Start backend + frontend together
 ferret dev
 ```
 
-The frontend is at `http://localhost:3000` and the API at `http://localhost:8000`.
+Open **http://localhost:3000** in your browser. The API runs at **http://localhost:8000**.
+
+> At minimum, set `GROQ_API_KEY`, `OPENAI_API_KEY`, `JINA_API_KEY`, `QDRANT_URL`, and `QDRANT_API_KEY` in `.env`. To embed with Gemini instead of OpenAI, set `USE_LOCAL_EMBEDDINGS=true` and provide `GEMINI_API_KEY`. See [`.env.example`](.env.example) for the full, annotated list.
+
+---
+
+## How ferret Works
+
+ferret has two chat modes built on the same retrieval backbone.
+
+**Deep Dive** — paste an arXiv paper ID and have a focused conversation about that paper alone. Answers are strictly grounded in the ingested full text. When the context isn't enough to answer confidently, ferret surfaces related papers to explore instead of making something up.
+
+**Ask** — chat freely across every paper you've ingested so far. When retrieval falls short, ferret searches arXiv, ingests the most relevant candidates on the fly, and retries before giving you an answer. Your knowledge base grows as you use it.
+
+---
+
+## The Retrieval Pipeline
+
+This section is for people seeking deeper insight into how Ferret is built; the strategies that have proven effective for grounded, low-hallucination answers over academic text.
+
+Both modes share a **Corrective RAG (CRAG)** pipeline that runs end to end before any answer is streamed back to you. The diagram below is the editable source of truth ([`docs/pipeline.excalidraw`](docs/pipeline.excalidraw)); the Mermaid diagrams beneath it render live on GitHub.
+
+<!-- PIPELINE IMAGE PLACEHOLDER — export docs/pipeline.excalidraw to docs/pipeline.png, then swap the src below -->
+<p align="center">
+  <img src="docs/pipeline.svg" alt="Ferret ingestion + CRAG pipeline" width="860" />
+</p>
+
+### Ingestion — offline, once per paper
+
+```mermaid
+graph LR
+    A["arXiv ID"] --> B["Fetch<br/>metadata + HTML + PDF"]
+    B --> C["Parse<br/>HTML-first, PDF fallback"]
+    C --> D["Filter<br/>drop refs / equations / boilerplate"]
+    D --> E["Chunk<br/>parent sections → 512-tok children"]
+    E --> F["Embed children<br/>dense (OpenAI / Gemini) + sparse (BM25)"]
+    F --> G["Index"]
+    G --> H["Qdrant<br/>child dense + BM25 vectors"]
+    G --> I["SQLite<br/>parent + child text"]
+```
+
+A paper is fetched (HTML preferred, PDF fallback), parsed into sections, filtered to drop references and equation-only noise, then split into two granularities: **parent** sections (stored whole in SQLite) and **~512-token child** chunks (embedded into Qdrant). Only children are embedded; dense vectors via OpenAI or Gemini, plus a BM25 sparse vector. Tables and figures stay atomic so a caption or markdown table is never cut in half.
+
+### Query — online, per question (the CRAG graph)
+
+```mermaid
+graph TD
+    START(["User message"]) --> C["classify<br/>what kind of question?"]
+    C -->|chat / clarify / general| CHAT["generate<br/>(no retrieval)"]
+    C -->|research| R["retrieve<br/>hybrid search (Qdrant)"]
+    R --> RK["rerank<br/>(Jina cross-encoder)"]
+    RK --> EX["expand<br/>child → parent (SQLite)"]
+    EX --> GR{"grade<br/>is context good enough?"}
+    GR -->|sufficient| GEN["generate<br/>(70B, streamed answer)"]
+    GR -->|"insufficient<br/>(Ask mode)"| COR["ask_corrective<br/>search + ingest new papers"]
+    COR -->|"retry (≤2×)"| R
+    GR -->|"insufficient<br/>(Deep Dive)"| DD["deep_dive_insufficient<br/>suggest related papers"]
+    GEN --> DONE(["SSE stream to browser"])
+    CHAT --> DONE
+    DD --> DONE
+```
+
+| Stage | What it does | Why |
+|---|---|---|
+| **classify** | Routes the message: chitchat, clarification, general, or a real research question | Avoids running expensive retrieval on "hi" or "what can you do?" |
+| **retrieve** | Embeds the query, runs hybrid dense + BM25 search in Qdrant | Catches both "means the same thing" and "uses the exact term." Deep Dive filters to the chosen paper |
+| **rerank** | Re-scores the top ~30 candidates with a cross-encoder, keeps the best ~5 | The cross-encoder reads query + chunk *together*, far more precise than vector distance alone |
+| **expand** | Swaps surviving child chunks for their full parent sections | Small-to-big: the model reasons over complete arguments, not 512-token fragments |
+| **grade** | Decides whether the context is good enough to answer | Two thresholds + a cheap LLM tie-breaker; cheap when obvious, smart when borderline |
+| **generate** | Streams the final answer with the 70B model and emits citations | Only stage that uses the large model; output streams token-by-token over SSE |
+| **ask_corrective** | *(Ask mode, weak retrieval)* generates arXiv queries, ingests new papers, retries | The "corrective" in CRAG; the corpus grows to answer the question, then retries (≤ 2×) |
+| **deep_dive_insufficient** | *(Deep Dive, weak retrieval)* suggests related papers instead | In single-paper mode it stays honest rather than hallucinating |
+
+The grading step is what separates Ferret from a naive RAG setup. Rather than always generating an answer regardless of retrieval quality, it **decides first**. A reranked score above `0.6` is answered straight away; below `0.35` is treated as insufficient; anything in between is handed to a small, fast model that judges relevance directly. Cheap when the call is obvious, smart only when it's genuinely borderline.
+
+When the context is weak, the two modes diverge by design. **Ask mode self-heals**; it writes fresh arXiv search queries, ingests the most relevant new papers on the fly, and loops back through retrieval up to twice before answering. **Deep Dive stays strictly grounded**; it can't pull in outside content, so instead of guessing it surfaces related papers you might want to explore.
+
+This is the whole point: Ferret would rather tell you it doesn't have the answer, or go find more sources, than confidently make something up.
+
+### Why Hybrid Retrieval?
+
+Dense embeddings are good at semantic similarity. BM25 sparse search is good at exact keyword matches, which matters a lot in technical and academic text (model names, equation references, author names). Ferret runs both in parallel on Qdrant and fuses the results with **Reciprocal Rank Fusion (RRF) server-side**, so you get the benefits of both without the latency of two separate round-trips.
+
+### Small-to-Big Context Expansion
+
+Chunks are stored at retrieval size (~512 tokens) for precision but linked to their parent sections in SQLite. When a chunk scores well, Ferret expands it back to its full section before generating. This means the model reasons over complete arguments, not isolated paragraphs; **match on the child, answer from the parent.**
 
 ---
 
 ## CLI Reference
 
-All commands are exposed via the `ferret` CLI (installed by `pip install -e .`).
+Installing the package exposes the `ferret` command.
 
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `ferret init` | Create SQLite schema and ensure the Qdrant collection exists (safe to re-run) |
-| `ferret serve` | Start the FastAPI backend (`--host`, `--port`, `--reload`) |
-| `ferret web` | Start the Express frontend (`--port`) |
-| `ferret dev` | Start both backend and frontend; streams combined logs; `Ctrl-C` tears both down |
-| `ferret ingest <arxiv_id>` | Manually ingest a paper (e.g. `ferret ingest 2305.10601`) |
-| `ferret chat --mode ask` | Terminal REPL in Ask mode |
-| `ferret chat --mode deep_dive --paper-id <id>` | Terminal REPL grounded to a single paper |
-| `ferret eval --paper-id <id>` | Run the full RAG evaluation suite against an ingested paper |
-
----
-
-## Configuration
-
-Copy `.env.example` to `.env`. The variables below are the ones you're most likely to tune.
-
-### Groq (LLM)
-
-| Variable | Default | Description |
-|---|---|---|
-| `GROQ_API_KEY` | — | Required |
-| `GRADING_MODEL` | `llama-3.1-8b-instant` | Small model for grading, query gen, candidate checks |
-| `GENERATION_MODEL` | `llama-3.3-70b-versatile` | Larger model for final user-facing answers |
-
-### Jina AI (Reranking)
-
-| Variable | Default | Description |
-|---|---|---|
-| `JINA_API_KEY` | — | Required — free key at [jina.ai/reranker](https://jina.ai/reranker) |
-| `JINA_RERANK_MODEL` | `jina-reranker-v2-base-multilingual` | Reranker model |
-| `JINA_MAX_CONCURRENCY` | `4` | Bounded concurrency for rerank calls |
-| `JINA_RETRY_BASE_WAIT` | `2` | Backoff base (s) on transient 429/5xx; `wait = base * attempt` |
-| `JINA_TIMEOUT` | `30` | Per-request timeout (s) |
-
-Dense embeddings come from OpenAI (`OPENAI_EMBED_MODEL`) or Gemini when `USE_LOCAL_EMBEDDINGS=true` — see the embeddings vars above.
-
-### Qdrant
-
-| Variable | Default | Description |
-|---|---|---|
-| `QDRANT_URL` | — | Your Qdrant Cloud cluster URL |
-| `QDRANT_API_KEY` | — | Required |
-| `QDRANT_COLLECTION_NAME` | `arxiv_chunks` | Collection name |
-| `SPARSE_MODEL` | `Qdrant/bm25` | BM25 sparse encoder |
-
-### Ingestion
-
-| Variable | Default | Description |
-|---|---|---|
-| `ARXIV_PREFER_HTML` | `true` | Use arXiv HTML rendering (better section boundaries); falls back to PDF |
-| `CHILD_CHUNK_TOKENS` | `512` | Child chunk size (retrieval unit) |
-| `CHILD_CHUNK_OVERLAP` | `64` | Overlap between consecutive child chunks |
-| `SECTION_DROP_LIST` | `references,bibliography,...` | Comma-separated section names to drop before chunking |
-
-### CRAG Chat Flow
-
-| Variable | Default | Description |
-|---|---|---|
-| `GRADE_HIGH_THRESHOLD` | `0.6` | Above this → sufficient (skip LLM judge) |
-| `GRADE_LOW_THRESHOLD` | `0.35` | Below this → insufficient (skip LLM judge) |
-| `RERANK_CANDIDATE_COUNT` | `30` | Candidates sent to reranker |
-| `RERANK_TOP_K` | `5` | Kept after reranking |
-| `GENERATION_MAX_PARENTS` | `5` | Max parent sections expanded into generation context |
-| `CRAG_MAX_RETRIES` | `2` | Ask-mode corrective loop cap |
-| `ASK_ARXIV_QUERY_COUNT` | `3` | Queries generated per corrective step |
-| `ASK_INGEST_CANDIDATES` | `3` | Papers ingested per corrective step |
-
-### Server
-
-| Variable | Default | Description |
-|---|---|---|
-| `BACKEND_HOST` | `127.0.0.1` | FastAPI host |
-| `BACKEND_PORT` | `8000` | FastAPI port |
-| `FRONTEND_PORT` | `3000` | Express port |
+| `ferret init` | Create the SQLite schema and Qdrant collection (idempotent) |
+| `ferret serve` | Run the FastAPI backend (default `http://localhost:8000`) |
+| `ferret web` | Run the Express frontend (default `http://localhost:3000`) |
+| `ferret dev` | Run backend + frontend together; Ctrl-C tears down both |
+| `ferret ingest <arxiv_id>` | Ingest a paper; add `--force` to repair Qdrant/SQLite drift |
+| `ferret chat --mode ask` | Cross-corpus chat from the terminal |
+| `ferret chat --mode deep_dive --paper-id <id>` | Single-paper chat from the terminal |
+| `ferret eval --paper-id <id>` | Run the full RAG eval suite against an ingested paper |
 
 ---
 
 ## Testing
 
-Tests live in `tests/` (backend) and `frontend/tests/`. External APIs are mocked in unit tests.
-
-### Unit tests (default — no real API calls)
-
 ```bash
-pytest
+pytest                                    # backend unit tests (external APIs mocked)
+pytest -m integration                     # real API calls (skipped by default)
+pytest -m eval                            # full RAG eval suite (skipped by default)
+pytest path/to/test_foo.py::test_name     # a single test
+
+cd frontend && npm test                   # frontend unit tests (Vitest)
 ```
 
-### Integration tests (real API calls — requires `.env`)
-
-```bash
-pytest -m integration
-```
-
-### RAG evaluation suite (requires an ingested paper)
-
-```bash
-ferret eval --paper-id 2305.10601
-# or
-pytest -m eval
-# or
-python evals/run_all.py --paper-id 2305.10601
-```
-
-Reports are written to `evals/reports/`. The first run saves a baseline; subsequent runs flag regressions.
-
-### Frontend tests
-
-```bash
-cd frontend && npm test
-```
-
-### Testing strategy
-
-- **Unit**: every backend module has a corresponding `tests/test_<module>.py`. Groq, Jina, Qdrant, and arXiv calls are patched with `pytest-mock`. Parser, chunker, filter, and grader logic are exercised with fixture inputs.
-- **Integration** (`@pytest.mark.integration`): hit real endpoints to verify the full ingestion and chat flow end-to-end. Skipped in CI by default.
-- **Eval** (`@pytest.mark.eval`): 5-layer RAG quality suite run against a real ingested paper. See below.
+The eval suite produces retrieval (ranx), grading-accuracy, and generation (RAGAS) reports under `evals/reports/`. Run it with `pytest -m eval`, `python evals/run_all.py --paper-id <id>`, or `ferret eval --paper-id <id>`.
 
 ---
 
-## Tech Stack
+## License
 
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.11, FastAPI, LangGraph, SQLAlchemy (async), aiosqlite, Typer |
-| Frontend | Node.js, Express, vanilla JS (ES6), HTML5/CSS3, Vitest |
-| Vector store | Qdrant Cloud — dense + sparse (BM25) named vectors, server-side RRF |
-| Embeddings / rerank | OpenAI `text-embedding-3-small` (or Gemini) dense embeddings; Jina `jina-reranker-v2-base-multilingual` rerank |
-| LLM | Groq — `llama-3.1-8b-instant` (grading), `llama-3.3-70b-versatile` (generation) |
-| Document parsing | BeautifulSoup4 (HTML), PyMuPDF (PDF fallback) |
-| Eval | pytest, RAGAS, ranx, Datasets |
-
----
-
-## Project Structure
-
-```
-ferret/
-├── backend/
-│   ├── api/            # FastAPI app, routers (papers, sessions), Pydantic schemas
-│   ├── cli/            # Typer CLI commands
-│   ├── db/             # SQLAlchemy models + async session factory
-│   ├── graph/          # LangGraph graphs, state, nodes (retrieve/rerank/grade/generate/…)
-│   ├── ingestion/      # arXiv client, HTML+PDF parser, filter, chunker, embedder
-│   └── vectorstore/    # Qdrant client, hybrid search, BM25 sparse encoder
-├── frontend/
-│   ├── public/         # index.html
-│   ├── static/         # app.js, style.css
-│   └── server.js       # Express app
-├── evals/              # 5-layer RAG evaluation suite
-├── tests/              # pytest unit + integration tests
-├── docs/               # Architecture diagram
-├── PRD.md              # Authoritative architecture & design doc
-├── CLAUDE.md           # AI coding conventions
-└── .env.example        # All environment variables with descriptions
-```
+[MIT](LICENSE) © 2026 Ibrahim Ali
