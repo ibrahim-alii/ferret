@@ -1,4 +1,4 @@
-/* Ferret — Paper & Ink: off-white paper, near-black ink, crimson library-stamp accent */
+/* ferret — Paper & Ink: off-white paper, near-black ink, crimson library-stamp accent */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -101,7 +101,7 @@ body.sidebar-collapsed .logo-text { display: none; }
 
 body.sidebar-collapsed .logo-mark { display: inline-block; }
 
-/* Ferret nameplate, top of the sidebar — left aligned, lighter weight, larger. */
+/* ferret nameplate, top of the sidebar — left aligned, lighter weight, larger. */
 .sidebar-brand {
   padding: 0 0.5rem 1.1rem;
 }

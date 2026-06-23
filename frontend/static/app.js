@@ -1,5 +1,5 @@
 /**
- * Ferret frontend — vanilla JS client
+ * ferret frontend — vanilla JS client
  *
  * Exports pure/testable functions, then wires up the DOM when running in a
  * real browser (guarded by presence of #app element).

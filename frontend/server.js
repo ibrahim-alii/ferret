@@ -36,6 +36,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const app = createApp();
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`Ferret frontend listening on http://localhost:${PORT}`);
+    console.log(`ferret frontend listening on http://localhost:${PORT}`);
   });
 }

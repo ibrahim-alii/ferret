@@ -1,9 +1,6 @@
-<!-- LOGO PLACEHOLDER — swap docs/logo.svg for the real logo (e.g. docs/logo.png) when ready -->
 <p align="center">
-  <img src="docs/logo.svg" alt="ferret logo" width="160" />
+  <img src="docs/logo.png" alt="ferret logo" width="320" />
 </p>
-
-<h1 align="center">ferret</h1>
 
 <p align="center">
   Chat with arXiv research papers. Get answers grounded in real text, not guesses.
@@ -92,7 +89,7 @@ ferret has two chat modes built on the same retrieval backbone.
 
 This section is for people seeking deeper insight into how ferret is built; the strategies that have proven effective for grounded, low-hallucination answers over academic text.
 
-Both modes share a **Corrective RAG (CRAG)** pipeline that runs end to end before any answer is streamed back to you. The diagram below is the editable source of truth ([`docs/pipeline.excalidraw`](docs/pipeline.excalidraw)); the Mermaid diagrams beneath it render live on GitHub.
+Both modes share a **Corrective RAG (CRAG)** pipeline that runs end to end before any answer is streamed back to you.
 
 <!-- PIPELINE IMAGE PLACEHOLDER — export docs/pipeline.excalidraw to docs/pipeline.png, then swap the src below -->
 <p align="center">
@@ -140,26 +137,26 @@ graph TD
 | **classify** | Routes the message: chitchat, clarification, general, or a real research question | Avoids running expensive retrieval on "hi" or "what can you do?" |
 | **retrieve** | Embeds the query, runs hybrid dense + BM25 search in Qdrant | Catches both "means the same thing" and "uses the exact term." Deep Dive filters to the chosen paper |
 | **rerank** | Re-scores the top ~30 candidates with a cross-encoder, keeps the best ~5 | The cross-encoder reads query + chunk *together*, far more precise than vector distance alone |
-| **mmr** | *(Ask mode only)* greedily re-selects the top ~5 to trade a little relevance for diversity (λ=0.7), dropping near-duplicate chunks | Cross-corpus search surfaces near-identical chunks from similar papers; Deep Dive is single-paper so it's skipped |
+| **mmr** | *(Ask mode only)* re-selects the top ~5 to trade a little relevance for diversity (λ=0.7), dropping near-duplicate chunks | Cross-corpus search surfaces near-identical chunks from similar papers; Deep Dive is single-paper so it's skipped |
 | **expand** | Swaps surviving child chunks for their full parent sections | Small-to-big: the model reasons over complete arguments, not 512-token fragments |
 | **grade** | Decides whether the context is good enough to answer | Two thresholds + a cheap LLM tie-breaker; cheap when obvious, smart when borderline |
 | **generate** | Streams the final answer with the 70B model and emits citations | Only stage that uses the large model; output streams token-by-token over SSE |
 | **ask_corrective** | *(Ask mode, weak retrieval)* generates arXiv queries, ingests new papers, retries | The "corrective" in CRAG; the corpus grows to answer the question, then retries (≤ 2×) |
 | **deep_dive_insufficient** | *(Deep Dive, weak retrieval)* suggests related papers instead — cross-corpus retrieval surfaces the most relevant *already-ingested* papers (excluding the current one), falling back to an arXiv search only when the corpus has nothing else | In single-paper mode it stays honest rather than hallucinating; suggestions you can already open beat generic keyword hits |
 
-The grading step is what separates Ferret from a naive RAG setup. Rather than always generating an answer regardless of retrieval quality, it **decides first**. A reranked score above `0.6` is answered straight away; below `0.35` is treated as insufficient; anything in between is handed to a small, fast model that judges relevance directly. Cheap when the call is obvious, smart only when it's genuinely borderline.
+The grading step is what separates ferret from a naive RAG setup. Rather than always generating an answer regardless of retrieval quality, it **decides first**. A reranked score above `0.6` is answered straight away; below `0.35` is treated as insufficient; anything in between is handed to a small, fast model that judges relevance directly. Cheap when the call is obvious, smart only when it's genuinely borderline.
 
 When the context is weak, the two modes diverge by design. **Ask mode self-heals**; it writes fresh arXiv search queries, ingests the most relevant new papers on the fly, and loops back through retrieval up to twice before answering. **Deep Dive stays strictly grounded**; it can't pull in outside content to *answer*, so instead of guessing it surfaces related papers you might want to explore — running a cross-corpus search to recommend the most relevant papers already in your library (never the chunk text itself), and only reaching out to arXiv when nothing else in the corpus fits.
 
-This is the whole point: Ferret would rather tell you it doesn't have the answer, or go find more sources, than confidently make something up.
+This is the whole point: ferret would rather tell you it doesn't have the answer, or go find more sources, than confidently make something up.
 
 ### Why Hybrid Retrieval?
 
-Dense embeddings are good at semantic similarity. BM25 sparse search is good at exact keyword matches, which matters a lot in technical and academic text (model names, equation references, author names). Ferret runs both in parallel on Qdrant and fuses the results with **Reciprocal Rank Fusion (RRF) server-side**, so you get the benefits of both without the latency of two separate round-trips.
+Dense embeddings are good at semantic similarity. BM25 sparse search is good at exact keyword matches, which matters a lot in technical and academic text (model names, equation references, author names). ferret runs both in parallel on Qdrant and fuses the results with **Reciprocal Rank Fusion (RRF) server-side**, so you get the benefits of both without the latency of two separate round-trips.
 
 ### Small-to-Big Context Expansion
 
-Chunks are stored at retrieval size (~512 tokens) for precision but linked to their parent sections in SQLite. When a chunk scores well, Ferret expands it back to its full section before generating. This means the model reasons over complete arguments, not isolated paragraphs; **match on the child, answer from the parent.**
+Chunks are stored at retrieval size (~512 tokens) for precision but linked to their parent sections in SQLite. When a chunk scores well, ferret expands it back to its full section before generating. This means the model reasons over complete arguments, not isolated paragraphs; **match on the child, answer from the parent.**
 
 ---
 
