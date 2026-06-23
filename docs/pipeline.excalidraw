@@ -1,0 +1,100 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    { "id": "ing-title", "type": "text", "x": 40, "y": 30, "width": 360, "height": 25, "text": "INGESTION  —  offline, once per paper", "fontSize": 16, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#1971c2", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 11 },
+
+    { "id": "ing-arxiv", "type": "rectangle", "x": 40, "y": 80, "width": 150, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 101 },
+    { "id": "ing-arxiv-t", "type": "text", "x": 70, "y": 102, "width": 90, "height": 20, "text": "arXiv ID", "fontSize": 14, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 102 },
+
+    { "id": "ing-fetch", "type": "rectangle", "x": 240, "y": 80, "width": 150, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 103 },
+    { "id": "ing-fetch-t", "type": "text", "x": 255, "y": 96, "width": 120, "height": 40, "text": "Fetch\nmeta + HTML + PDF", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 104 },
+
+    { "id": "ing-parse", "type": "rectangle", "x": 440, "y": 80, "width": 150, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 105 },
+    { "id": "ing-parse-t", "type": "text", "x": 455, "y": 96, "width": 120, "height": 40, "text": "Parse\nHTML-first, PDF fallback", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 106 },
+
+    { "id": "ing-filter", "type": "rectangle", "x": 640, "y": 80, "width": 150, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 107 },
+    { "id": "ing-filter-t", "type": "text", "x": 655, "y": 96, "width": 120, "height": 40, "text": "Filter\ndrop refs / eqs / boilerplate", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 108 },
+
+    { "id": "ing-chunk", "type": "rectangle", "x": 840, "y": 80, "width": 150, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 109 },
+    { "id": "ing-chunk-t", "type": "text", "x": 855, "y": 96, "width": 120, "height": 40, "text": "Chunk\nparent section + 512-tok child", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 110 },
+
+    { "id": "ing-embed", "type": "rectangle", "x": 1040, "y": 80, "width": 160, "height": 64, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 111 },
+    { "id": "ing-embed-t", "type": "text", "x": 1052, "y": 90, "width": 136, "height": 50, "text": "Embed children\ndense (OpenAI / Gemini)\n+ sparse (BM25)", "fontSize": 11, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 112 },
+
+    { "id": "store-qdrant", "type": "rectangle", "x": 940, "y": 230, "width": 160, "height": 60, "strokeColor": "#2f9e44", "backgroundColor": "#b2f2bb", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 113 },
+    { "id": "store-qdrant-t", "type": "text", "x": 952, "y": 244, "width": 136, "height": 32, "text": "Qdrant\nchild dense + BM25 vectors", "fontSize": 11, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 114 },
+
+    { "id": "store-sqlite", "type": "rectangle", "x": 1140, "y": 230, "width": 160, "height": 60, "strokeColor": "#2f9e44", "backgroundColor": "#b2f2bb", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 115 },
+    { "id": "store-sqlite-t", "type": "text", "x": 1152, "y": 244, "width": 136, "height": 32, "text": "SQLite\nparent + child text", "fontSize": 11, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 116 },
+
+    { "id": "a-arxiv-fetch", "type": "arrow", "x": 192, "y": 112, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 201, "endArrowhead": "arrow" },
+    { "id": "a-fetch-parse", "type": "arrow", "x": 392, "y": 112, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 202, "endArrowhead": "arrow" },
+    { "id": "a-parse-filter", "type": "arrow", "x": 592, "y": 112, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 203, "endArrowhead": "arrow" },
+    { "id": "a-filter-chunk", "type": "arrow", "x": 792, "y": 112, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 204, "endArrowhead": "arrow" },
+    { "id": "a-chunk-embed", "type": "arrow", "x": 992, "y": 112, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 205, "endArrowhead": "arrow" },
+    { "id": "a-embed-qdrant", "type": "arrow", "x": 1090, "y": 144, "width": 70, "height": 84, "points": [[0, 0], [-70, 84]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 206, "endArrowhead": "arrow" },
+    { "id": "a-embed-sqlite", "type": "arrow", "x": 1140, "y": 144, "width": 80, "height": 84, "points": [[0, 0], [80, 84]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 207, "endArrowhead": "arrow" },
+
+    { "id": "q-title", "type": "text", "x": 40, "y": 360, "width": 520, "height": 25, "text": "QUERY  —  online, per question  ·  CRAG graph", "fontSize": 16, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#e8590c", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 301 },
+
+    { "id": "q-user", "type": "rectangle", "x": 40, "y": 410, "width": 150, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 302 },
+    { "id": "q-user-t", "type": "text", "x": 60, "y": 432, "width": 110, "height": 20, "text": "User message", "fontSize": 13, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 303 },
+
+    { "id": "q-classify", "type": "rectangle", "x": 240, "y": 410, "width": 150, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 304 },
+    { "id": "q-classify-t", "type": "text", "x": 255, "y": 426, "width": 120, "height": 40, "text": "classify\nintent routing (8B)", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 305 },
+
+    { "id": "q-retrieve", "type": "rectangle", "x": 440, "y": 410, "width": 150, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 306 },
+    { "id": "q-retrieve-t", "type": "text", "x": 455, "y": 426, "width": 120, "height": 40, "text": "retrieve\nhybrid dense + BM25, RRF", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 307 },
+
+    { "id": "q-rerank", "type": "rectangle", "x": 640, "y": 410, "width": 150, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 308 },
+    { "id": "q-rerank-t", "type": "text", "x": 655, "y": 426, "width": 120, "height": 40, "text": "rerank\nJina cross-encoder, top ~5", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 309 },
+
+    { "id": "q-expand", "type": "rectangle", "x": 840, "y": 410, "width": 150, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffec99", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 310 },
+    { "id": "q-expand-t", "type": "text", "x": 855, "y": 426, "width": 120, "height": 40, "text": "expand\nsmall-to-big (child → parent)", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 311 },
+
+    { "id": "q-grade", "type": "diamond", "x": 1030, "y": 396, "width": 180, "height": 92, "strokeColor": "#c92a2a", "backgroundColor": "#ffc9c9", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 312 },
+    { "id": "q-grade-t", "type": "text", "x": 1050, "y": 428, "width": 140, "height": 32, "text": "grade\ncontext good enough?", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 313 },
+
+    { "id": "q-generate", "type": "rectangle", "x": 1045, "y": 560, "width": 150, "height": 64, "strokeColor": "#6741d9", "backgroundColor": "#d0bfff", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 314 },
+    { "id": "q-generate-t", "type": "text", "x": 1058, "y": 576, "width": 124, "height": 40, "text": "generate\n70B, streamed + citations", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 315 },
+
+    { "id": "q-corrective", "type": "rectangle", "x": 440, "y": 560, "width": 160, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffd8a8", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 316 },
+    { "id": "q-corrective-t", "type": "text", "x": 452, "y": 570, "width": 136, "height": 48, "text": "ask_corrective (Ask)\nsearch arXiv → ingest\nnew papers", "fontSize": 11, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 317 },
+
+    { "id": "q-deepdive", "type": "rectangle", "x": 720, "y": 560, "width": 170, "height": 64, "strokeColor": "#e8590c", "backgroundColor": "#ffd8a8", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 318 },
+    { "id": "q-deepdive-t", "type": "text", "x": 732, "y": 570, "width": 146, "height": 48, "text": "deep_dive_insufficient\n(Deep Dive)\nsuggest related papers", "fontSize": 11, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 319 },
+
+    { "id": "q-sse", "type": "rectangle", "x": 1045, "y": 690, "width": 150, "height": 56, "strokeColor": "#343a40", "backgroundColor": "#dee2e6", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 320 },
+    { "id": "q-sse-t", "type": "text", "x": 1058, "y": 708, "width": 124, "height": 20, "text": "SSE stream → browser", "fontSize": 12, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "strokeColor": "#1e1e1e", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 321 },
+
+    { "id": "qa-user-classify", "type": "arrow", "x": 192, "y": 442, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 401, "endArrowhead": "arrow" },
+    { "id": "qa-classify-retrieve", "type": "arrow", "x": 392, "y": 442, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 402, "endArrowhead": "arrow" },
+    { "id": "qa-classify-retrieve-t", "type": "text", "x": 398, "y": 416, "width": 40, "height": 18, "text": "research", "fontSize": 10, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#868e96", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 403 },
+    { "id": "qa-retrieve-rerank", "type": "arrow", "x": 592, "y": 442, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 404, "endArrowhead": "arrow" },
+    { "id": "qa-rerank-expand", "type": "arrow", "x": 792, "y": 442, "width": 46, "height": 0, "points": [[0, 0], [46, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 405, "endArrowhead": "arrow" },
+    { "id": "qa-expand-grade", "type": "arrow", "x": 992, "y": 442, "width": 38, "height": 0, "points": [[0, 0], [38, 0]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 406, "endArrowhead": "arrow" },
+
+    { "id": "qa-grade-generate", "type": "arrow", "x": 1120, "y": 488, "width": 0, "height": 72, "points": [[0, 0], [0, 72]], "strokeColor": "#2f9e44", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 407, "endArrowhead": "arrow" },
+    { "id": "qa-grade-generate-t", "type": "text", "x": 1126, "y": 510, "width": 70, "height": 18, "text": "sufficient", "fontSize": 10, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#2f9e44", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 408 },
+
+    { "id": "qa-grade-corrective", "type": "arrow", "x": 1030, "y": 460, "width": 510, "height": 130, "points": [[0, 0], [-510, 0], [-510, 130]], "strokeColor": "#c92a2a", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 409, "endArrowhead": "arrow" },
+    { "id": "qa-grade-corrective-t", "type": "text", "x": 610, "y": 444, "width": 160, "height": 18, "text": "insufficient · Ask mode", "fontSize": 10, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#c92a2a", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 410 },
+
+    { "id": "qa-grade-deepdive", "type": "arrow", "x": 1040, "y": 478, "width": 235, "height": 82, "points": [[0, 0], [-235, 0], [-235, 82]], "strokeColor": "#c92a2a", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 411, "endArrowhead": "arrow" },
+    { "id": "qa-grade-deepdive-t", "type": "text", "x": 812, "y": 536, "width": 180, "height": 18, "text": "insufficient · Deep Dive", "fontSize": 10, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#c92a2a", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 412 },
+
+    { "id": "qa-corrective-retrieve", "type": "arrow", "x": 520, "y": 560, "width": 0, "height": 86, "points": [[0, 0], [0, -86]], "strokeColor": "#c92a2a", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 413, "endArrowhead": "arrow" },
+    { "id": "qa-corrective-retrieve-t", "type": "text", "x": 524, "y": 506, "width": 90, "height": 18, "text": "retry (≤ 2×)", "fontSize": 10, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#c92a2a", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 414 },
+
+    { "id": "qa-generate-sse", "type": "arrow", "x": 1120, "y": 624, "width": 0, "height": 64, "points": [[0, 0], [0, 64]], "strokeColor": "#495057", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100, "angle": 0, "seed": 415, "endArrowhead": "arrow" },
+
+    { "id": "note-stores", "type": "text", "x": 940, "y": 320, "width": 360, "height": 20, "text": "retrieve reads Qdrant · expand reads SQLite", "fontSize": 11, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "strokeColor": "#868e96", "fillStyle": "solid", "backgroundColor": "transparent", "roughness": 1, "opacity": 100, "angle": 0, "seed": 416 }
+  ],
+  "appState": {
+    "gridSize": null,
+    "viewBackgroundColor": "#ffffff"
+  },
+  "files": {}
+}

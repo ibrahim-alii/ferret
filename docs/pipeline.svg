@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="200" viewBox="0 0 860 200" role="img" aria-label="Pipeline diagram placeholder">
+  <rect width="860" height="200" rx="12" fill="#f8f9fa" stroke="#ced4da"/>
+  <text x="50%" y="40%" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" font-weight="600" fill="#343a40" text-anchor="middle">Pipeline diagram placeholder</text>
+  <text x="50%" y="58%" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#868e96" text-anchor="middle">Open docs/pipeline.excalidraw in Excalidraw and export to docs/pipeline.png</text>
+  <text x="50%" y="74%" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#adb5bd" text-anchor="middle">(the Mermaid diagrams below render live in the meantime)</text>
+</svg>
