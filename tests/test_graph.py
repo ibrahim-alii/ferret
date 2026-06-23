@@ -446,12 +446,14 @@ async def test_deep_dive_insufficient_does_not_call_ingest(monkeypatch):
 
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])), \
          patch("backend.graph.ingestion_graph.run_ingestion", mock_ingest):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
         state = make_state(
             mode="deep_dive",
             user_message="Tell me about CRAG",
             retrieved_chunks=[make_chunk()],
+            query_vector=[0.1, 0.2, 0.3],
         )
         await deep_dive_insufficient_node(state)
 
@@ -497,12 +499,14 @@ async def test_deep_dive_insufficient_generates_arxiv_queries_via_grading_model(
     mock_http_client.__aexit__ = AsyncMock(return_value=False)
 
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
-         patch("httpx.AsyncClient", return_value=mock_http_client):
+         patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
         state = make_state(
             mode="deep_dive",
             user_message="Tell me about CRAG",
             retrieved_chunks=[make_chunk()],
+            query_vector=[0.1, 0.2, 0.3],
         )
         await deep_dive_insufficient_node(state)
 
@@ -545,9 +549,12 @@ async def test_deep_dive_insufficient_searches_arxiv_and_emits_citation_events(m
 
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])), \
          patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
+        state = make_state(
+            mode="deep_dive", retrieved_chunks=[make_chunk()], query_vector=[0.1, 0.2, 0.3]
+        )
         await deep_dive_insufficient_node(state)
 
     citation_events = [e for e in emitted if e.get("type") == "citation"]
@@ -588,9 +595,12 @@ async def test_deep_dive_insufficient_response_includes_not_enough_info_message(
 
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])), \
          patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
+        state = make_state(
+            mode="deep_dive", retrieved_chunks=[make_chunk()], query_vector=[0.1, 0.2, 0.3]
+        )
         await deep_dive_insufficient_node(state)
 
     token_events = [e for e in emitted if e.get("type") == "token"]
@@ -632,9 +642,12 @@ async def test_deep_dive_insufficient_does_not_write_sqlite(monkeypatch):
 
     with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
          patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])), \
          patch("aiosqlite.connect", mock_aiosqlite_connect):
         from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
-        state = make_state(mode="deep_dive", retrieved_chunks=[make_chunk()])
+        state = make_state(
+            mode="deep_dive", retrieved_chunks=[make_chunk()], query_vector=[0.1, 0.2, 0.3]
+        )
         await deep_dive_insufficient_node(state)
 
     assert not mock_aiosqlite_connect.called
@@ -1020,6 +1033,155 @@ async def test_deep_dive_insufficient_zero_chunks_emits_drift_message_no_arxiv(m
     assert not [e for e in emitted if e.get("type") == "citation"]
     tokens = "".join(e.get("content", "") for e in emitted if e.get("type") == "token")
     assert "out of sync" in tokens.lower()
+
+
+# ---------------------------------------------------------------------------
+# Deep Dive insufficient — corpus-first suggestions
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+def _fake_papers_conn(rows: list[dict]):
+    """Minimal async aiosqlite stand-in for the papers title/abstract lookup."""
+    class _Cursor:
+        def __aiter__(self):
+            async def gen():
+                for r in rows:
+                    yield r
+            return gen()
+
+    class _Conn:
+        row_factory = None
+
+        async def execute(self, *a, **k):
+            return _Cursor()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    return MagicMock(return_value=_Conn())
+
+
+@pytest.mark.asyncio
+async def test_deep_dive_insufficient_suggests_from_corpus_first(monkeypatch):
+    # Cross-corpus retrieval finds related ingested papers -> suggest those, no arXiv call.
+    def _fail_http(*a, **k):
+        raise AssertionError("arXiv must not be called when the corpus has suggestions")
+
+    corpus_hits = [
+        SimpleNamespace(paper_id="otherA"),
+        SimpleNamespace(paper_id="otherB"),
+    ]
+    rows = [
+        {"arxiv_id": "otherA", "title": "Paper A", "abstract": "Abstract A"},
+        {"arxiv_id": "otherB", "title": "Paper B", "abstract": "Abstract B"},
+    ]
+
+    emitted: list[dict] = []
+    with patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search",
+               AsyncMock(return_value=corpus_hits)), \
+         patch("aiosqlite.connect", _fake_papers_conn(rows)), \
+         patch("httpx.AsyncClient", _fail_http), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
+        from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
+        state = make_state(
+            mode="deep_dive",
+            paper_id="current",
+            retrieved_chunks=[make_chunk()],
+            query_vector=[0.1, 0.2, 0.3],
+        )
+        result = await deep_dive_insufficient_node(state)
+
+    cited_ids = [e["arxiv_id"] for e in emitted if e.get("type") == "citation"]
+    assert cited_ids == ["otherA", "otherB"]
+    assert result["citations"] == [
+        {"arxiv_id": "otherA", "title": "Paper A"},
+        {"arxiv_id": "otherB", "title": "Paper B"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deep_dive_insufficient_excludes_current_paper_from_corpus(monkeypatch):
+    corpus_hits = [
+        SimpleNamespace(paper_id="current"),
+        SimpleNamespace(paper_id="current"),
+        SimpleNamespace(paper_id="otherA"),
+    ]
+    rows = [{"arxiv_id": "otherA", "title": "Paper A", "abstract": "Abstract A"}]
+
+    emitted: list[dict] = []
+    with patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search",
+               AsyncMock(return_value=corpus_hits)), \
+         patch("aiosqlite.connect", _fake_papers_conn(rows)), \
+         patch("httpx.AsyncClient", lambda *a, **k: (_ for _ in ()).throw(
+             AssertionError("arXiv must not be called"))), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
+        from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
+        state = make_state(
+            mode="deep_dive",
+            paper_id="current",
+            retrieved_chunks=[make_chunk()],
+            query_vector=[0.1, 0.2, 0.3],
+        )
+        await deep_dive_insufficient_node(state)
+
+    cited_ids = [e["arxiv_id"] for e in emitted if e.get("type") == "citation"]
+    assert cited_ids == ["otherA"]
+    assert "current" not in cited_ids
+
+
+@pytest.mark.asyncio
+async def test_deep_dive_insufficient_falls_back_to_arxiv_when_corpus_empty(monkeypatch):
+    # Corpus has nothing else (only the deep-dived paper) -> fall back to arXiv search.
+    monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
+
+    mock_message = MagicMock()
+    mock_message.content = "crag query"
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(return_value=mock_completion)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    mock_groq_instance = MagicMock()
+    mock_groq_instance.chat = mock_chat
+
+    mock_http_response = MagicMock()
+    mock_http_response.text = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2301.00001v1</id>
+    <title>ArXiv Fallback Paper</title>
+    <summary>Fallback abstract.</summary>
+  </entry>
+</feed>"""
+    mock_http_client = AsyncMock()
+    mock_http_client.get = AsyncMock(return_value=mock_http_response)
+    mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+    mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+    emitted: list[dict] = []
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance), \
+         patch("httpx.AsyncClient", return_value=mock_http_client), \
+         patch("backend.graph.nodes.deep_dive_insufficient.hybrid_search", AsyncMock(return_value=[])), \
+         patch("backend.graph.nodes.deep_dive_insufficient.emit", emitted.append):
+        from backend.graph.nodes.deep_dive_insufficient import deep_dive_insufficient_node
+        state = make_state(
+            mode="deep_dive",
+            paper_id="current",
+            retrieved_chunks=[make_chunk()],
+            query_vector=[0.1, 0.2, 0.3],
+        )
+        await deep_dive_insufficient_node(state)
+
+    cited_ids = [e["arxiv_id"] for e in emitted if e.get("type") == "citation"]
+    assert cited_ids == ["2301.00001"]
 
 
 @pytest.mark.asyncio
