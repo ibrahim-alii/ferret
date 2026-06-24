@@ -26,6 +26,7 @@ _DEFAULT_OPENAI_MODEL = "text-embedding-3-small"
 _DEFAULT_GEMINI_MODEL = "gemini-embedding-001"
 _DEFAULT_BATCH_SIZE = 128
 _DEFAULT_MAX_CONCURRENCY = 5
+_GEMINI_MAX_BATCH = 100
 
 
 def _use_gemini() -> bool:
@@ -95,6 +96,9 @@ async def embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     Returns vectors in the same order as input chunks.
     """
     batch_size = int(os.environ.get("OPENAI_BATCH_SIZE", str(_DEFAULT_BATCH_SIZE)))
+    if _use_gemini():
+        # Gemini's BatchEmbedContents rejects any batch over 100 requests.
+        batch_size = min(batch_size, _GEMINI_MAX_BATCH)
 
     client = _make_client()
     # Shared at module level so concurrent ingestions (e.g. Ask's corrective branch

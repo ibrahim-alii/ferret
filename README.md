@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="ferret logo" width="320" />
+  <img src="docs/logo.png" alt="ferret logo" width="400" />
 </p>
 
 <p align="center">
@@ -15,9 +15,8 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
-<!-- DEMO PLACEHOLDER — swap docs/demo.svg for a Playwright-captured walkthrough (docs/demo.gif) -->
 <p align="center">
-  <img src="docs/demo.svg" alt="ferret demo" width="720" />
+  <img src="docs/demo.gif" alt="ferret demo" width="720" />
 </p>
 
 ---
@@ -82,6 +81,8 @@ ferret has two chat modes built on the same retrieval backbone.
 **Deep Dive** — paste an arXiv paper ID and have a focused conversation about that paper alone. Answers are strictly grounded in the ingested full text. When the context isn't enough to answer confidently, ferret surfaces related papers to explore instead of making something up.
 
 **Ask** — chat freely across every paper you've ingested so far. When retrieval falls short, ferret searches arXiv, ingests the most relevant candidates on the fly, and retries before giving you an answer. Your knowledge base grows as you use it.
+
+Either mode also supports **voice input** — tap the mic to dictate your question with live English speech-to-text (Chrome/Edge).
 
 ---
 
