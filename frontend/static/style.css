@@ -857,57 +857,88 @@ body.sidebar-collapsed .input-row { left: 64px; }
 .input-inner {
   position: relative;
   display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 760px;
   pointer-events: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  /* "Rectangular oval" — softly rounded corners, not a full pill. */
+  border-radius: 18px;
+  transition: border-color 0.15s;
 }
+
+.input-inner:focus-within { border-color: var(--accent); }
 
 #chat-input {
   flex: 1;
-  padding: 0.85rem 3.6rem 0.85rem 1.4rem;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  padding: 0.85rem 1.1rem 0.4rem;
+  background: transparent;
+  border: none;
   color: var(--text);
   font-family: var(--reading);
   font-size: 1.05rem;
+  line-height: 1.5;
   resize: none;
   outline: none;
-  transition: border-color 0.15s;
-  min-height: 2.9rem;
-  max-height: 9rem;
+  /* Room for 1 line by default; grows up to 4 lines, then scrolls.
+     border-box, so these include the vertical padding above. */
+  min-height: 2.825rem;
+  max-height: 7.55rem;
   overflow-y: auto;
 }
 
-#chat-input:focus { border-color: var(--accent); }
 #chat-input::placeholder { color: var(--text-muted); }
 #chat-input:disabled { opacity: 0.4; }
 
-#chat-btn {
-  position: absolute;
-  right: 0.55rem;
-  /* Vertically centered on the textarea's first line (half of the 2.9rem
-     min-height). */
-  top: 1.45rem;
-  transform: translateY(-50%);
+/* Buttons sit on their own row below the typing area. */
+.input-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem 0.55rem;
+}
+
+#chat-btn,
+#mic-btn {
   width: 2.1rem;
   height: 2.1rem;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent);
   border: none;
-  border-radius: 50%;
-  color: var(--bg);
-  font-size: 1rem;
+  /* Rounded-rectangle ("rectangular oval") to match the input box, slightly
+     tighter radius since the buttons are small. */
+  border-radius: 9px;
   line-height: 1;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: opacity 0.15s, transform 0.1s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 
-#chat-btn:hover:not(:disabled) { transform: translateY(-50%) scale(1.06); }
-#chat-btn:disabled { opacity: 0.35; cursor: default; }
+#chat-btn {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 1rem;
+}
+
+#mic-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+#chat-btn:hover:not(:disabled) { transform: scale(1.06); }
+#mic-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+#chat-btn:disabled,
+#mic-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Mic mirrors the input's enabled state (it has no JS handler yet). */
+.input-inner:has(#chat-input:disabled) #mic-btn { opacity: 0.35; pointer-events: none; }
+
+/* Active recording state so the user can tell the mic is live. */
+#mic-btn.recording { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -1052,6 +1052,7 @@ function initApp() {
   function pollIngestion(arxivId) {
     if (state.pollingTimer) clearInterval(state.pollingTimer);
     let consecutiveErrors = 0;
+    const startedAt = Date.now();
     state.pollingTimer = setInterval(async () => {
       try {
         const paper = await checkIngestionStatus(arxivId);
@@ -1078,6 +1079,11 @@ function initApp() {
           clearInterval(state.pollingTimer);
           statusEl.textContent = 'Ingestion failed. Try another ID.';
           arxivBtn.disabled = false;
+        } else if (Date.now() - startedAt > 25000) {
+          // Large papers are paced under the embedding API's per-minute rate limit,
+          // so a long ingest is expected, not a hang. Tell the user why.
+          statusEl.textContent =
+            'Still ingesting — large papers are paced under the embedding API rate limit, so this can take a few minutes…';
         } else {
           statusEl.textContent = `Ingesting… (${paper.ingestion_status})`;
         }
@@ -1114,15 +1120,91 @@ function initApp() {
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
+  // Grow the textarea to fit its content. CSS caps it at 4 lines (max-height)
+  // and adds a scrollbar past that; min-height keeps it at 2 lines.
+  function autoGrow() {
+    chatInput.style.height = 'auto';
+    chatInput.style.height = `${chatInput.scrollHeight}px`;
+  }
+
   // Persist the unsent draft as it's typed, scoped to the active chat, so closing
   // the tab mid-prompt doesn't lose it (restored on openSession / re-create below).
-  chatInput.addEventListener('input', () => saveDraft(state.sessionId, chatInput.value));
+  chatInput.addEventListener('input', () => {
+    saveDraft(state.sessionId, chatInput.value);
+    autoGrow();
+  });
+
+  // Mic button: live English speech-to-text via the Web Speech API. Words stream
+  // into the input as you speak (interim results), committed on pause/stop. No-ops
+  // where the API is unavailable (e.g. Firefox, tests).
+  const micBtn = document.getElementById('mic-btn');
+  const SpeechRecognition =
+    typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (micBtn && SpeechRecognition) {
+    let recognition = null;
+    // Text already in the input when recording started — streamed speech is appended
+    // to it so dictation doesn't clobber what the user typed.
+    let baseText = '';
+    // Finalized (non-interim) speech accumulated across result events this session.
+    let finalText = '';
+
+    function render(extra) {
+      const sep = baseText && extra ? ' ' : '';
+      chatInput.value = baseText + sep + extra;
+      autoGrow();
+      // Programmatic value updates don't move the caret/scroll, so once the text
+      // passes the 4-line cap the newest words sit below the fold. Keep the latest
+      // line visible while dictating.
+      chatInput.scrollTop = chatInput.scrollHeight;
+      saveDraft(state.sessionId, chatInput.value);
+    }
+
+    function startRecognition() {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      baseText = chatInput.value.trim();
+      finalText = '';
+
+      recognition.addEventListener('result', (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const transcript = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalText += transcript;
+          else interim += transcript;
+        }
+        render((finalText + interim).trim());
+      });
+      recognition.addEventListener('error', (e) => {
+        console.error('Speech recognition error', e.error);
+      });
+      // Fires on stop() and on Chrome's auto-stop after a pause; commit and reset.
+      recognition.addEventListener('end', () => {
+        render(finalText.trim());
+        recognition = null;
+        micBtn.classList.remove('recording');
+        micBtn.setAttribute('aria-pressed', 'false');
+        chatInput.focus();
+      });
+
+      recognition.start();
+      micBtn.classList.add('recording');
+      micBtn.setAttribute('aria-pressed', 'true');
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (recognition) recognition.stop();
+      else startRecognition();
+    });
+  }
 
   // Drop the active chat's stored draft into the input. Call after a session is
   // set and its history is loaded.
   function restoreDraft() {
     const draft = loadDraft(state.sessionId);
     if (draft) chatInput.value = draft;
+    autoGrow();
   }
 
   async function sendMessage() {
@@ -1135,6 +1217,7 @@ function initApp() {
     activeStreamController = controller;
 
     chatInput.value = '';
+    autoGrow();
     clearDraft(state.sessionId);
     isSending = true;
     chatBtn.disabled = true;

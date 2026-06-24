@@ -104,6 +104,15 @@ async def test_generate_node_general_intent_emits_no_citations(monkeypatch):
 # _build_messages prompt content
 # ---------------------------------------------------------------------------
 
+def test_chat_prompt_declines_unsupported_session_actions():
+    # The CHAT path has no tools; it must not claim to rename/delete/clear the
+    # chat or change settings, which it cannot actually do.
+    messages = _build(intent="chat")
+    system = messages[0]["content"].lower()
+    assert "cannot" in system
+    assert "rename" in system
+
+
 def test_clarify_prompt_asks_clarifying_question():
     messages = _build(intent="clarify")
     system = messages[0]["content"].lower()
