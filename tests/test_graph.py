@@ -397,6 +397,105 @@ async def test_grade_node_returns_sufficient_or_insufficient_with_reasoning(monk
     assert isinstance(gr["reasoning"], str)
 
 
+def _mock_groq_returning(content_text):
+    """Build a mocked groq.AsyncGroq whose completion returns content_text."""
+    mock_message = MagicMock()
+    mock_message.content = content_text
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_completion = MagicMock()
+    mock_completion.choices = [mock_choice]
+
+    mock_completions = AsyncMock()
+    mock_completions.create = AsyncMock(return_value=mock_completion)
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+    mock_groq_instance = MagicMock()
+    mock_groq_instance.chat = mock_chat
+    return mock_groq_instance, mock_completions
+
+
+@pytest.mark.asyncio
+async def test_grade_node_deep_dive_low_score_broad_question_consults_llm_sufficient(monkeypatch):
+    """Deep Dive broad/summary query scores low but the LLM grader says yes -> sufficient."""
+    monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
+    monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
+    monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
+
+    mock_groq_instance, mock_completions = _mock_groq_returning(
+        "yes. The chunk is from this paper and can support a summary."
+    )
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance):
+        from backend.graph.nodes.grade import grade_node
+        state = make_state(
+            mode="deep_dive",
+            paper_id="arxiv123",
+            user_message="Summarize this paper",
+            reranked_children=[make_chunk(score=0.2)],
+        )
+        result = await grade_node(state)
+
+    assert mock_completions.create.called  # did NOT hard-fail; consulted the grader
+    assert result["grade_result"]["sufficient"] is True
+
+    # And routing follows through to generation, not the insufficient/corpus path.
+    from backend.graph.edges import route_after_grade
+    state["grade_result"] = result["grade_result"]
+    assert route_after_grade(state) == "generate_deep_dive"
+
+
+@pytest.mark.asyncio
+async def test_grade_node_deep_dive_low_score_off_paper_question_refuses(monkeypatch):
+    """Deep Dive off-paper query: LLM grader says no -> still insufficient (refusal preserved)."""
+    monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
+    monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
+    monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
+
+    mock_groq_instance, mock_completions = _mock_groq_returning(
+        "no. The chunk does not discuss Mistral 7B sliding window attention."
+    )
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance):
+        from backend.graph.nodes.grade import grade_node
+        state = make_state(
+            mode="deep_dive",
+            paper_id="arxiv123",
+            user_message="What does the Mistral 7B paper say about sliding window attention?",
+            reranked_children=[make_chunk(score=0.2)],
+        )
+        result = await grade_node(state)
+
+    assert mock_completions.create.called
+    assert result["grade_result"]["sufficient"] is False
+
+    from backend.graph.edges import route_after_grade
+    state["grade_result"] = result["grade_result"]
+    assert route_after_grade(state) == "deep_dive_insufficient"
+
+
+@pytest.mark.asyncio
+async def test_grade_node_ask_mode_low_score_still_hard_fails_without_llm(monkeypatch):
+    """Ask mode keeps the score-only hard-fail: no LLM grader call on low score."""
+    monkeypatch.setenv("GRADE_HIGH_THRESHOLD", "0.6")
+    monkeypatch.setenv("GRADE_LOW_THRESHOLD", "0.35")
+    monkeypatch.setenv("GRADING_MODEL", "llama-3.1-8b-instant")
+
+    mock_groq_instance, mock_completions = _mock_groq_returning("yes. irrelevant")
+
+    with patch("groq.AsyncGroq", return_value=mock_groq_instance):
+        from backend.graph.nodes.grade import grade_node
+        state = make_state(
+            mode="ask",
+            user_message="Summarize this paper",
+            reranked_children=[make_chunk(score=0.2)],
+        )
+        result = await grade_node(state)
+
+    assert result["grade_result"]["sufficient"] is False
+    assert not mock_completions.create.called
+
+
 # ---------------------------------------------------------------------------
 # Deep Dive branch
 # ---------------------------------------------------------------------------

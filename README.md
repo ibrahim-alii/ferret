@@ -19,8 +19,6 @@
   <img src="docs/demo.gif" alt="ferret demo" width="720" />
 </p>
 
----
-
 ## Getting Started
 
 **Prerequisites:** Python 3.11+, Node.js 18+, and accounts on **Groq**, **Jina AI**, **OpenAI** (or **Gemini**), and **Qdrant Cloud**.
@@ -151,6 +149,22 @@ When the context is weak, the two modes diverge by design. **Ask mode self-heals
 
 This is the whole point: ferret would rather tell you it doesn't have the answer, or go find more sources, than confidently make something up.
 
+### Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **LLMs** | Groq — generation (70B), grading (smaller fast model) |
+| **Embeddings** | OpenAI `text-embedding-3-small` (default) · Gemini `text-embedding-004` (`USE_LOCAL_EMBEDDINGS=true`) |
+| **Vector DB** | Qdrant Cloud — dense + BM25 sparse vectors, server-side RRF fusion |
+| **Reranker** | Jina AI cross-encoder |
+| **PDF/HTML parsing** | arXiv HTML (primary) · PyMuPDF PDF fallback |
+| **Chunking** | tiktoken — parent sections + ~512-token child chunks |
+| **Backend** | FastAPI · LangGraph (CRAG graph) · SSE streaming |
+| **Frontend** | Express · vanilla JS |
+| **State DB** | SQLite via SQLAlchemy async + aiosqlite |
+
+---
+
 ### Why Hybrid Retrieval?
 
 Dense embeddings are good at semantic similarity. BM25 sparse search is good at exact keyword matches, which matters a lot in technical and academic text (model names, equation references, author names). ferret runs both in parallel on Qdrant and fuses the results with **Reciprocal Rank Fusion (RRF) server-side**, so you get the benefits of both without the latency of two separate round-trips.
@@ -161,7 +175,7 @@ Chunks are stored at retrieval size (~512 tokens) for precision but linked to th
 
 ### Pacing Embeddings Under Rate Limits
 
-On the local/dev embedding path (Gemini, `USE_LOCAL_EMBEDDINGS=true`) the free tier caps embedding **requests per minute**, and every chunk counts as one request — so a large paper (hundreds of chunks) would otherwise burst straight into rate-limit errors mid-ingestion. ferret paces embedding calls with a **token-bucket limiter** (`GEMINI_EMBED_RPM`, default 90, leaving headroom under the 100/min free tier), so ingestion stays under the quota instead of failing. It's reliable, not fast: throughput converges to the rate, so a big paper can take a few minutes. The ingest status line says so during long waits, so the delay reads as expected rather than a hang. The default production path (OpenAI embeddings) has far higher limits and isn't throttled.
+On the local/dev embedding path (Gemini, `USE_LOCAL_EMBEDDINGS=true`) the free tier caps embedding **requests per minute**, and every chunk counts as one request — so a large paper (hundreds of chunks) would otherwise burst straight into rate-limit errors mid-ingestion. ferret paces embedding calls with a **token-bucket limiter** (`GEMINI_EMBED_RPM`, default 95, leaving headroom under the 100/min free tier), so ingestion stays under the quota instead of failing. It's reliable, not fast: throughput converges to the rate, so a big paper can take a few minutes. The ingest status line says so during long waits, so the delay reads as expected rather than a hang. The default production path (OpenAI embeddings) has far higher limits and isn't throttled.
 
 ---
 
