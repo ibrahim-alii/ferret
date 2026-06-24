@@ -153,12 +153,12 @@ This is the whole point: ferret would rather tell you it doesn't have the answer
 
 | Layer | Technology |
 |---|---|
-| **LLMs** | Groq — generation (70B), grading (smaller fast model) |
+| **LLMs** | Groq: generation (70B), grading (smaller fast model) |
 | **Embeddings** | OpenAI `text-embedding-3-small` (default) · Gemini `text-embedding-004` (`USE_LOCAL_EMBEDDINGS=true`) |
-| **Vector DB** | Qdrant Cloud — dense + BM25 sparse vectors, server-side RRF fusion |
+| **Vector DB** | Qdrant Cloud: dense + BM25 sparse vectors, server-side RRF fusion |
 | **Reranker** | Jina AI cross-encoder |
 | **PDF/HTML parsing** | arXiv HTML (primary) · PyMuPDF PDF fallback |
-| **Chunking** | tiktoken — parent sections + ~512-token child chunks |
+| **Chunking** | tiktoken: parent sections + ~512-token child chunks |
 | **Backend** | FastAPI · LangGraph (CRAG graph) · SSE streaming |
 | **Frontend** | Express · vanilla JS |
 | **State DB** | SQLite via SQLAlchemy async + aiosqlite |
@@ -175,7 +175,7 @@ Chunks are stored at retrieval size (~512 tokens) for precision but linked to th
 
 ### Pacing Embeddings Under Rate Limits
 
-On the local/dev embedding path (Gemini, `USE_LOCAL_EMBEDDINGS=true`) the free tier caps embedding **requests per minute**, and every chunk counts as one request — so a large paper (hundreds of chunks) would otherwise burst straight into rate-limit errors mid-ingestion. ferret paces embedding calls with a **token-bucket limiter** (`GEMINI_EMBED_RPM`, default 95, leaving headroom under the 100/min free tier), so ingestion stays under the quota instead of failing. It's reliable, not fast: throughput converges to the rate, so a big paper can take a few minutes. The ingest status line says so during long waits, so the delay reads as expected rather than a hang. The default production path (OpenAI embeddings) has far higher limits and isn't throttled.
+On the local/dev embedding path (Gemini, `USE_LOCAL_EMBEDDINGS=true`), the free tier limits embedding requests per minute, and each chunk counts as a request. Large papers can contain hundreds of chunks, which would otherwise trigger rate-limit errors during ingestion. ferret uses a token-bucket limiter (GEMINI_EMBED_RPM, default 95) to keep requests below the 100/minute free-tier limit. Ingestion remains reliable but runs at the configured rate, so large papers may take several minutes to process. During long waits, the ingest status line reports progress so the delay appears expected rather than stalled. The default production path (OpenAI embeddings) has much higher limits and does not require throttling.
 
 ---
 
