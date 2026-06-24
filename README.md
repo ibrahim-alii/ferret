@@ -159,6 +159,10 @@ Dense embeddings are good at semantic similarity. BM25 sparse search is good at 
 
 Chunks are stored at retrieval size (~512 tokens) for precision but linked to their parent sections in SQLite. When a chunk scores well, ferret expands it back to its full section before generating. This means the model reasons over complete arguments, not isolated paragraphs; **match on the child, answer from the parent.**
 
+### Pacing Embeddings Under Rate Limits
+
+On the local/dev embedding path (Gemini, `USE_LOCAL_EMBEDDINGS=true`) the free tier caps embedding **requests per minute**, and every chunk counts as one request — so a large paper (hundreds of chunks) would otherwise burst straight into rate-limit errors mid-ingestion. ferret paces embedding calls with a **token-bucket limiter** (`GEMINI_EMBED_RPM`, default 90, leaving headroom under the 100/min free tier), so ingestion stays under the quota instead of failing. It's reliable, not fast: throughput converges to the rate, so a big paper can take a few minutes. The ingest status line says so during long waits, so the delay reads as expected rather than a hang. The default production path (OpenAI embeddings) has far higher limits and isn't throttled.
+
 ---
 
 ## CLI Reference

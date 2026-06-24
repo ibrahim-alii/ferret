@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 
 from google import genai
 from google.genai import types
@@ -27,6 +28,47 @@ _DEFAULT_GEMINI_MODEL = "gemini-embedding-001"
 _DEFAULT_BATCH_SIZE = 128
 _DEFAULT_MAX_CONCURRENCY = 5
 _GEMINI_MAX_BATCH = 100
+_DEFAULT_GEMINI_RPM = 90  # 10% headroom under the free tier's 100 requests/minute
+
+
+class _AsyncRateLimiter:
+    """Token-bucket limiter pacing embed calls to a sustained requests/minute rate.
+
+    Gemini's free embedding tier caps requests-per-minute, and each chunk counts as
+    one request, so a large paper (>100 chunks) bursts straight into 429s. We refill
+    ``rate_per_min / 60`` tokens per second up to ``capacity`` and make every call
+    consume one token per text, so ingestion paces itself under the quota instead of
+    failing. ``throttled`` flips True whenever a call actually had to wait, so callers
+    can surface that to the user. Reliable, not fast: throughput converges to the rate.
+    """
+
+    def __init__(self, rate_per_min: float, capacity: float) -> None:
+        self._rate = rate_per_min / 60.0  # tokens per second
+        self._capacity = capacity
+        self._tokens = capacity
+        self._updated = time.monotonic()
+        self._lock = asyncio.Lock()
+        self.throttled = False
+
+    async def acquire(self, n: float = 1.0) -> None:
+        n = min(n, self._capacity)  # never ask for more than the bucket can ever hold
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                self._tokens = min(self._capacity, self._tokens + (now - self._updated) * self._rate)
+                self._updated = now
+                if self._tokens >= n:
+                    self._tokens -= n
+                    return
+                wait = (n - self._tokens) / self._rate
+            self.throttled = True
+            log.info("Embedding rate limit reached; pacing ingestion (waiting %.1fs)", wait)
+            await asyncio.sleep(wait)
+
+
+_gemini_rpm = float(os.environ.get("GEMINI_EMBED_RPM", str(_DEFAULT_GEMINI_RPM)))
+# Capacity covers a full max-size batch so acquire() can never deadlock on n > capacity.
+_gemini_limiter = _AsyncRateLimiter(rate_per_min=_gemini_rpm, capacity=max(_gemini_rpm, _GEMINI_MAX_BATCH))
 
 
 def _use_gemini() -> bool:
@@ -62,6 +104,7 @@ async def _embed_batch(
         try:
             async with semaphore:
                 if _use_gemini():
+                    await _gemini_limiter.acquire(len(texts))
                     model = os.environ.get("GEMINI_EMBED_MODEL", _DEFAULT_GEMINI_MODEL)
                     result = await client.aio.models.embed_content(
                         model=model,
