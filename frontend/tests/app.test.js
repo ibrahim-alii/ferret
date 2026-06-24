@@ -7,7 +7,6 @@ import {
   parseSSEChunk,
   buildMessageEl,
   buildCitationEl,
-  buildInterimEl,
   buildThinkingPanel,
   buildSessionEl,
   enableChat,
@@ -26,11 +25,6 @@ describe('parseSSEChunk', () => {
   it('test_token_events_append_to_current_message_in_order — parses token event', () => {
     const result = parseSSEChunk('event: token\ndata: {"content":"hello"}\n\n');
     expect(result).toEqual({ type: 'token', payload: { content: 'hello' } });
-  });
-
-  it('test_interim_message_event — parses interim_message', () => {
-    const result = parseSSEChunk('event: interim_message\ndata: {"content":"Searching…"}\n\n');
-    expect(result).toEqual({ type: 'interim_message', payload: { content: 'Searching…' } });
   });
 
   it('test_citation_events — parses citation', () => {
@@ -91,14 +85,6 @@ describe('buildMessageEl', () => {
     const user = buildMessageEl('user', 'see **this**');
     expect(user.querySelector('strong')).toBeNull();
     expect(user.textContent).toBe('see **this**');
-  });
-});
-
-describe('buildInterimEl', () => {
-  it('test_interim_message_event_renders_as_distinct_element_before_main_response — has distinct class', () => {
-    const el = buildInterimEl('Searching archives…');
-    expect(el.classList.contains('msg-interim')).toBe(true);
-    expect(el.textContent).toContain('Searching archives…');
   });
 });
 
@@ -503,16 +489,6 @@ describe('buildThinkingPanel (stepper)', () => {
     expect(rows[1].classList.contains('step-done')).toBe(false);
     expect(rows[1].querySelector('.thinking-spinner')).not.toBeNull();
     expect(rows[1].querySelector('.step-label').textContent).toBe('Drafting answer');
-  });
-
-  it('updateStep replaces the active row label in place without adding a row', () => {
-    const panel = buildThinkingPanel();
-    panel.setStep('Ranking passages');
-    panel.updateStep('Ranking 12 passages');
-
-    const rows = panel.el.querySelectorAll('.step-row');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].querySelector('.step-label').textContent).toBe('Ranking 12 passages');
   });
 
   it('complete() marks the active row done (✓ via .step-done, spinner removed)', () => {

@@ -72,18 +72,11 @@ export function hoistFigures(bubbleEl) {
   bubbleEl.insertAdjacentElement('afterend', tray);
 }
 
-export function buildInterimEl(text) {
-  const el = document.createElement('div');
-  el.classList.add('msg', 'msg-interim');
-  el.textContent = text;
-  return el;
-}
-
 /**
  * A live step list (stepper): the current task shows a spinner; when the next
  * task starts, the prior task's spinner turns into a ✓ tick and a new active row
  * appears. Driven by real SSE status events. Returns
- * { el, setStep(text), updateStep(text), complete() }.
+ * { el, setStep(text), complete() }.
  */
 export function buildThinkingPanel() {
   const el = document.createElement('div');
@@ -94,7 +87,6 @@ export function buildThinkingPanel() {
   el.setAttribute('aria-live', 'polite');
 
   let activeRow = null;
-  let activeLabel = null;
 
   function markActiveDone() {
     if (!activeRow) return;
@@ -127,19 +119,13 @@ export function buildThinkingPanel() {
     el.appendChild(row);
 
     activeRow = row;
-    activeLabel = label;
-  }
-
-  function updateStep(text) {
-    if (!text || !activeLabel) return;
-    activeLabel.textContent = text;
   }
 
   function complete() {
     markActiveDone();
   }
 
-  return { el, setStep, updateStep, complete };
+  return { el, setStep, complete };
 }
 
 // A source-paper "pill": shows the title, links to the arXiv abstract page, and
@@ -444,11 +430,11 @@ export function clearDraft(sessionId) {
 
 /**
  * POST to `url` with JSON `body`, then consume the SSE response stream.
- * Callbacks: onToken(text), onInterim(text), onCitation(obj), onDone(), onError(err).
+ * Callbacks: onToken(text), onCitation(obj), onDone(), onError(err).
  * Handles the backend's `error` SSE frame as well as transport failures.
  */
 export async function consumeSSEStream(url, body, callbacks = {}) {
-  const { onToken, onInterim, onCitation, onStatus, onDone, onError, signal } = callbacks;
+  const { onToken, onCitation, onStatus, onDone, onError, signal } = callbacks;
 
   let response;
   try {
@@ -495,9 +481,6 @@ export async function consumeSSEStream(url, body, callbacks = {}) {
             break;
           case 'status':
             onStatus && onStatus(event.payload.content, event.payload.step);
-            break;
-          case 'interim_message':
-            onInterim && onInterim(event.payload.content);
             break;
           case 'citation':
             onCitation && onCitation(event.payload);
@@ -1261,11 +1244,6 @@ function initApp() {
           scrollBottom();
         },
         onToken:   (t) => { typewriter.push(t); },
-        onInterim: (t) => {
-          if (isChat || !thinking.el.isConnected) return;
-          thinking.updateStep(t);
-          scrollBottom();
-        },
         onCitation:(c) => { completeOnce(); citationContainer.appendChild(buildCitationEl(c)); scrollBottom(); },
         onDone:    ()  => {},
         onError:   (err)  => {

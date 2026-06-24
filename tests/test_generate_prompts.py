@@ -104,6 +104,29 @@ async def test_generate_node_general_intent_emits_no_citations(monkeypatch):
 # _build_messages prompt content
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"mode": "ask", "intent": "research", "parent_sections": [
+            {"text": "Transformers use attention.", "paper_title": "X", "paper_id": "1"}
+        ]},
+        {"mode": "deep_dive", "intent": "research", "parent_sections": [
+            {"text": "Transformers use attention.", "paper_title": "X", "paper_id": "1"}
+        ]},
+        {"intent": "general"},
+        {"intent": "chat"},
+    ],
+)
+def test_prompts_carry_injection_guardrail(overrides):
+    # Every user-facing prompt must instruct the model not to reveal its
+    # instructions or obey role/rule-override attempts (the HACKED / admin-mode
+    # injections the QA pass found in Ask mode).
+    messages = _build(**overrides)
+    system = messages[0]["content"].lower()
+    assert "do not" in system and "instructions" in system
+    assert "role" in system  # ignore attempts to change role / enter admin mode
+
+
 def test_chat_prompt_declines_unsupported_session_actions():
     # The CHAT path has no tools; it must not claim to rename/delete/clear the
     # chat or change settings, which it cannot actually do.

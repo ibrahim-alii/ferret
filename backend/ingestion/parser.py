@@ -24,6 +24,10 @@ _FIGURE_CAPTION_RE = re.compile(r"^\s*(figure|fig\.?)\s*\d+", re.IGNORECASE)
 # arXiv ids may contain a slash (old style, e.g. "hep-th/9901001"); allow that but
 # strip anything that could escape the media directory.
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9._/-]")
+# arXiv MathML emits zero-width chars between sub/superscript glyphs (e.g.
+# "P_drop" renders as "P d​r​o​p"). They survive get_text() and
+# corrupt table cells and prose, so strip them from the HTML before parsing.
+_ZERO_WIDTH_RE = re.compile("[\u200b\u200c\u200d\ufeff]")
 # Image extensions PyMuPDF may report; anything else is coerced to png so a crafted
 # PDF can't smuggle path separators through extract_image()'s ext field.
 _ALLOWED_IMG_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
@@ -92,6 +96,9 @@ def _html_table_to_markdown(table) -> str:
 def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
     from bs4 import BeautifulSoup
 
+    # Strip zero-width chars up front so they can't survive get_text() into any
+    # extracted block (table cells, captions, prose). See _ZERO_WIDTH_RE.
+    html_content = _ZERO_WIDTH_RE.sub("", html_content)
     soup = BeautifulSoup(html_content, "lxml")
     # arXiv HTML renders math as MathML that carries the raw TeX in an
     # <annotation encoding="application/x-tex"> sibling of the rendered glyph.
@@ -99,7 +106,11 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
     # macro into prose and table cells, so drop the annotation source up front.
     for ann in soup.find_all("annotation"):
         ann.decompose()
-    base = f"https://arxiv.org/html/{_safe_id(arxiv_id)}/"
+    # arXiv serves HTML at /html/<id>v<n> and its <img> srcs are paths relative
+    # to /html/ that already include the versioned dir (e.g. "<id>v7/Figures/x.png").
+    # So the base is /html/ itself; injecting the id here would double it
+    # ("/html/<id>/<id>v7/...") and 404.
+    base = "https://arxiv.org/html/"
     blocks: list[ParsedBlock] = []
 
     for sec in soup.find_all("section"):
@@ -124,9 +135,11 @@ def _parse_html(html_content: str, arxiv_id: str) -> list[ParsedBlock]:
                 img = fig.find("img")
                 src = img.get("src") if img else None
                 url = urljoin(base, src) if src else None
-                # Only hotlink images that resolve back onto arxiv.org; a crafted
-                # src (or arxiv_id) must not point the rendered <img> elsewhere.
-                if url and not url.startswith("https://arxiv.org/"):
+                # Only hotlink images under this paper's own HTML dir
+                # (/html/<id>...); a crafted src must not point the rendered <img>
+                # at another paper or off arxiv entirely.
+                allowed_prefix = f"https://arxiv.org/html/{_safe_id(arxiv_id)}"
+                if url and not url.startswith(allowed_prefix):
                     url = None
                 if caption or url:
                     blocks.append(

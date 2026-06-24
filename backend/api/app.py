@@ -24,7 +24,14 @@ from backend.db.session import close_db, init_db
 
 # Comma-separated list of allowed origins for CORS. Falls back to local dev
 # servers when FRONTEND_ORIGIN is unset.
-_DEFAULT_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+_DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    # 127.0.0.1 is a distinct origin from localhost; allow both so the app works
+    # regardless of which address the browser is pointed at in local dev.
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 
 # Reject request bodies larger than this before they are buffered/parsed. The
 # Pydantic per-field caps only apply after the full body is read, so without this

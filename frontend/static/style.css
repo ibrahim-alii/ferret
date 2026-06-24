@@ -550,17 +550,6 @@ body.sidebar-collapsed .new-chat-icon { font-size: 1.25rem; }
   color: var(--text);
 }
 
-.msg-interim {
-  align-self: flex-start;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  font-style: italic;
-  background: transparent;
-  border: none;
-  padding: 0.2rem 0;
-}
-
 .msg-error { border-color: var(--red) !important; color: var(--red) !important; }
 
 /* ── Thinking panel (live step list / stepper) ── */

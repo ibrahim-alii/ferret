@@ -221,7 +221,7 @@ async def test_expand_node_fetches_parent_sections_for_reranked_children(monkeyp
 
     chunks = [make_chunk(chunk_id="c1", parent_chunk_id="p1", paper_id="arxiv1", score=0.9)]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "content_type": "text", "media_url": None, "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "abstract": "An abstract.", "content_type": "text", "media_url": None, "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -251,7 +251,7 @@ async def test_expand_node_dedupes_shared_parents(monkeypatch):
         make_chunk(chunk_id="c2", parent_chunk_id="p1", paper_id="arxiv1", score=0.8),
     ]
 
-    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "content_type": "text", "media_url": None, "section_name": "Intro", "text": "Parent text"}
+    mock_row = {"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "abstract": "An abstract.", "content_type": "text", "media_url": None, "section_name": "Intro", "text": "Parent text"}
 
     mock_cursor = AsyncMock()
     mock_cursor.fetchone = AsyncMock(return_value=mock_row)
@@ -283,7 +283,7 @@ async def test_expand_node_caps_distinct_parents(monkeypatch):
 
     async def fake_execute(sql, params=None):
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "content_type": "text", "media_url": None, "section_name": "S", "text": f"text_{call_count}"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": params[0] if params else "px", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "abstract": "An abstract.", "content_type": "text", "media_url": None, "section_name": "S", "text": f"text_{call_count}"})
         return mock_cursor
 
     mock_conn = AsyncMock()
@@ -974,18 +974,15 @@ async def test_generate_node_emits_deduped_citations(monkeypatch):
     monkeypatch.setenv("GENERATION_MODEL", "m")
     import backend.graph.nodes.generate as gen
 
-    # Make the abstract lookup a no-op so the test doesn't depend on a real DB.
-    def _no_db(*a, **k):
-        raise RuntimeError("no db in test")
-    monkeypatch.setattr(gen.aiosqlite, "connect", _no_db)
-
+    # Citations now read the abstract carried on parent_sections (from expand),
+    # so there is no DB lookup here at all.
     emitted: list[dict] = []
     state = make_state(
         intent="research",
         parent_sections=[
-            {"paper_id": "2402.17764", "paper_title": "BitNet"},
-            {"paper_id": "2402.17764", "paper_title": "BitNet"},
-            {"paper_id": "2310.06825", "paper_title": "Mistral 7B"},
+            {"paper_id": "2402.17764", "paper_title": "BitNet", "abstract": "BitNet abstract"},
+            {"paper_id": "2402.17764", "paper_title": "BitNet", "abstract": "BitNet abstract"},
+            {"paper_id": "2310.06825", "paper_title": "Mistral 7B", "abstract": "Mistral abstract"},
         ],
     )
     with patch("groq.AsyncGroq", return_value=_fake_groq_stream()), \
@@ -995,6 +992,7 @@ async def test_generate_node_emits_deduped_citations(monkeypatch):
     cites = [e for e in emitted if e.get("type") == "citation"]
     assert [c["arxiv_id"] for c in cites] == ["2402.17764", "2310.06825"]
     assert cites[0]["title"] == "BitNet"
+    assert cites[0]["abstract_snippet"] == "BitNet abstract"
 
 
 @pytest.mark.asyncio
@@ -1280,9 +1278,10 @@ async def test_generate_node_trims_context_to_token_budget(monkeypatch):
     system_content = next(
         m["content"] for m in sent["messages"] if m["role"] == "system"
     )
-    # Boilerplate prompt + a context capped near the 50-token budget — nowhere near
-    # the thousands of tokens the raw section would have contributed.
-    assert len(enc.encode(system_content)) < 320
+    # Boilerplate prompt (incl. the injection guardrail) + a context capped near
+    # the 50-token budget — nowhere near the thousands of tokens the raw section
+    # would have contributed.
+    assert len(enc.encode(system_content)) < 450
 
 
 @pytest.mark.asyncio
@@ -1482,7 +1481,7 @@ async def test_astream_chat_yields_token_events_then_done_event(monkeypatch):
     mock_hybrid = AsyncMock(return_value=[high_score_chunk])
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "content_type": "text", "media_url": None, "section_name": "S", "text": "context"})
+    mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "abstract": "An abstract.", "content_type": "text", "media_url": None, "section_name": "S", "text": "context"})
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock(return_value=mock_cursor)
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -1617,7 +1616,7 @@ async def test_astream_chat_does_not_write_to_sqlite(monkeypatch):
     async def fake_execute(sql, params=None):
         execute_calls.append(sql.strip().upper())
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "content_type": "text", "media_url": None, "section_name": "S", "text": "context"})
+        mock_cursor.fetchone = AsyncMock(return_value={"id": "p1", "parent_chunk_id": None, "paper_id": "arxiv1", "paper_title": "A Paper", "published_date": "2023-01-01T00:00:00Z", "abstract": "An abstract.", "content_type": "text", "media_url": None, "section_name": "S", "text": "context"})
         return mock_cursor
 
     mock_conn = AsyncMock()

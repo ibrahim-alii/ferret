@@ -288,7 +288,7 @@ SAMPLE_HTML_FIGURE = """<html><body>
   <h2>Architecture</h2>
   <p>The pipeline is shown in the figure.</p>
   <figure class="ltx_figure">
-    <img src="x1.png"/>
+    <img src="2301.00001v1/x1.png"/>
     <figcaption>Figure 2: System architecture overview.</figcaption>
   </figure>
 </section>
@@ -375,16 +375,48 @@ class TestParser:
         figures = [b for b in blocks if b.content_type == "figure"]
         assert len(figures) == 1
         assert "Figure 2" in figures[0].text
-        assert figures[0].media_url == "https://arxiv.org/html/2301.00001/x1.png"
+        # arXiv img srcs already carry the versioned dir; the resolved url must NOT
+        # double the id (".../2301.00001/2301.00001v1/...", which 404s).
+        assert figures[0].media_url == "https://arxiv.org/html/2301.00001v1/x1.png"
 
     def test_html_figure_rejects_non_arxiv_image_url(self):
         """A crafted <img src> must not hotlink off arxiv.org."""
         from backend.ingestion.parser import parse
 
-        html = SAMPLE_HTML_FIGURE.replace('src="x1.png"', 'src="https://evil.com/x.png"')
+        html = SAMPLE_HTML_FIGURE.replace(
+            'src="2301.00001v1/x1.png"', 'src="https://evil.com/x.png"'
+        )
         blocks = parse(html_content=html, pdf_bytes=None, arxiv_id="2301.00001")
         figures = [b for b in blocks if b.content_type == "figure"]
         assert figures and figures[0].media_url is None
+
+    def test_html_figure_rejects_cross_paper_image_url(self):
+        """A src pointing at another paper's HTML dir must be rejected."""
+        from backend.ingestion.parser import parse
+
+        html = SAMPLE_HTML_FIGURE.replace(
+            'src="2301.00001v1/x1.png"', 'src="9999.99999v1/x1.png"'
+        )
+        blocks = parse(html_content=html, pdf_bytes=None, arxiv_id="2301.00001")
+        figures = [b for b in blocks if b.content_type == "figure"]
+        assert figures and figures[0].media_url is None
+
+    def test_html_strips_zero_width_chars_from_cells(self):
+        """Zero-width chars arXiv emits inside math must not survive into cells."""
+        from backend.ingestion.parser import parse
+
+        zw = chr(0x200b)  # zero-width space, as arXiv MathML emits between glyphs
+        html = (
+            "<html><body><section id='S1'><h2>Results</h2>"
+            f"<table><tr><th>P{zw}d{zw}rop</th><th>BLEU</th></tr>"
+            "<tr><td>0.1</td><td>25.8</td></tr></table>"
+            "</section></body></html>"
+        )
+        blocks = parse(html_content=html, pdf_bytes=None, arxiv_id="2301.00001")
+        tables = [b for b in blocks if b.content_type == "table"]
+        assert tables, "expected a table block"
+        assert zw not in tables[0].text
+        assert "Pdrop" in tables[0].text
 
     def test_safe_id_strips_path_traversal(self):
         from backend.ingestion.parser import _safe_id
