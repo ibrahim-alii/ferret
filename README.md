@@ -76,11 +76,11 @@ Open **http://localhost:3000** in your browser; the API runs at **http://localho
 
 ferret has two chat modes built on the same retrieval backbone.
 
-**Deep Dive** — paste an arXiv paper ID and have a focused conversation about that paper alone. Answers are strictly grounded in the ingested full text. When the context isn't enough to answer confidently, ferret surfaces related papers to explore instead of making something up.
+**Deep Dive**: paste an arXiv paper ID and have a focused conversation about that paper alone. Answers are strictly grounded in the ingested full text. When the context isn't enough to answer confidently, ferret surfaces related papers to explore instead of making something up.
 
-**Ask** — chat freely across every paper you've ingested so far. When retrieval falls short, ferret searches arXiv, ingests the most relevant candidates on the fly, and retries before giving you an answer. Your knowledge base grows as you use it.
+**Ask**: chat freely across every paper you've ingested so far. When retrieval falls short, ferret searches arXiv, ingests the most relevant candidates on the fly, and retries before giving you an answer. Your knowledge base grows as you use it.
 
-Either mode also supports **voice input** — tap the mic to dictate your question with live English speech-to-text (Chrome/Edge).
+Either mode also supports **voice input**: tap the mic to dictate your question with live English speech-to-text (Chrome/Edge).
 
 ---
 
@@ -89,11 +89,6 @@ Either mode also supports **voice input** — tap the mic to dictate your questi
 This section is for people seeking deeper insight into how ferret is built; the strategies that have proven effective for grounded, low-hallucination answers over academic text.
 
 Both modes share a **Corrective RAG (CRAG)** pipeline that runs end to end before any answer is streamed back to you.
-
-<!-- PIPELINE IMAGE PLACEHOLDER — export docs/pipeline.excalidraw to docs/pipeline.png, then swap the src below -->
-<p align="center">
-  <img src="docs/pipeline.svg" alt="ferret ingestion + CRAG pipeline" width="860" />
-</p>
 
 ### Ingestion
 
@@ -141,11 +136,11 @@ graph TD
 | **grade** | Decides whether the context is good enough to answer | Two thresholds + a cheap LLM tie-breaker; cheap when obvious, smart when borderline |
 | **generate** | Streams the final answer with the 70B model and emits citations | Only stage that uses the large model; output streams token-by-token over SSE |
 | **ask_corrective** | *(Ask mode, weak retrieval)* generates arXiv queries, ingests new papers, retries | The "corrective" in CRAG; the corpus grows to answer the question, then retries (≤ 2×) |
-| **deep_dive_insufficient** | *(Deep Dive, weak retrieval)* suggests related papers instead — cross-corpus retrieval surfaces the most relevant *already-ingested* papers (excluding the current one), falling back to an arXiv search only when the corpus has nothing else | In single-paper mode it stays honest rather than hallucinating; suggestions you can already open beat generic keyword hits |
+| **deep_dive_insufficient** | *(Deep Dive, weak retrieval)* suggests related papers instead; cross-corpus retrieval surfaces the most relevant *already-ingested* papers (excluding the current one), falling back to an arXiv search only when the corpus has nothing else | In single-paper mode it stays honest rather than hallucinating; suggestions you can already open beat generic keyword hits |
 
 The grading step is what separates ferret from a naive RAG setup. Rather than always generating an answer regardless of retrieval quality, it **decides first**. A reranked score above `0.6` is answered straight away; below `0.35` is treated as insufficient; anything in between is handed to a small, fast model that judges relevance directly. Cheap when the call is obvious, smart only when it's genuinely borderline.
 
-When the context is weak, the two modes diverge by design. **Ask mode self-heals**; it writes fresh arXiv search queries, ingests the most relevant new papers on the fly, and loops back through retrieval up to twice before answering. **Deep Dive stays strictly grounded**; it can't pull in outside content to *answer*, so instead of guessing it surfaces related papers you might want to explore — running a cross-corpus search to recommend the most relevant papers already in your library (never the chunk text itself), and only reaching out to arXiv when nothing else in the corpus fits.
+When the context is weak, the two modes diverge by design. **Ask mode self-heals**: it writes fresh arXiv search queries, ingests the most relevant new papers on the fly, and loops back through retrieval up to twice before answering. **Deep Dive stays strictly grounded**: it can't pull in outside content to *answer*, so instead of guessing it surfaces related papers you might want to explore by running a cross-corpus search to recommend the most relevant papers already in your library (never the chunk text itself), and only reaching out to arXiv when nothing else in the corpus fits.
 
 This is the whole point: ferret would rather tell you it doesn't have the answer, or go find more sources, than confidently make something up.
 
